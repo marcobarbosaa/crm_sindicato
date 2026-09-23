@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 
 await import("./load-env.mjs");
 
@@ -9,28 +8,31 @@ if (!["dev", "build"].includes(command)) {
   throw new Error("Expected dev or build.");
 }
 
-const vinextCli = fileURLToPath(
-  new URL("../node_modules/vinext/dist/cli.js", import.meta.url)
-);
+console.log(`[run-framework] comando recebido: ${command}`);
+console.log(`[run-framework] iniciando vinext ${command}`);
 
-const finalArgs = [
-  vinextCli,
+const vinextArgs = [
+  "exec",
+  "vinext",
   command,
   ...(command === "dev" ? ["--port", "5173"] : []),
   ...args,
 ];
 
-console.log(`Executando Vinext: node ${finalArgs.slice(1).join(" ")}`);
-
-const result = spawnSync(process.execPath, finalArgs, {
+const result = spawnSync("pnpm", vinextArgs, {
   stdio: "inherit",
   shell: false,
   env: process.env,
 });
 
 if (result.error) {
+  console.error("[run-framework] erro ao iniciar Vinext:");
   throw result.error;
 }
+
+console.log(
+  `[run-framework] Vinext finalizado com código: ${result.status}`
+);
 
 if (result.status !== 0) {
   process.exit(result.status ?? 1);
