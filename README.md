@@ -24,6 +24,16 @@ corepack pnpm exec tsc --noEmit
 corepack pnpm build
 ```
 
+## Deploy na Cloudflare
+
+Este projeto deve ser publicado como **Cloudflare Worker**, não como Cloudflare Pages e não usando OpenNext. No painel da Cloudflare, remova o preset OpenNext e use o repositório com o comando:
+
+```text
+corepack pnpm deploy
+```
+
+O comando gera o Worker Vinext e executa o deploy usando `dist/server/wrangler.json`. Configure `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` e `TOKEN_ENCRYPTION_KEY` como secrets/variáveis do Worker na Cloudflare; não coloque credenciais no comando de build.
+
 O banco usa PostgreSQL no Supabase. As variáveis `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` e `TOKEN_ENCRYPTION_KEY` são necessárias apenas para conectar e enviar e-mails pelo Gmail.
 
 ## Supabase
