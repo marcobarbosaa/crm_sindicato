@@ -3,11 +3,15 @@ import { defineConfig } from "vite";
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 
 const managedLinux = readExecutionProfile() === "managed-linux";
+const isCloudflareDeploy = process.env.CLOUDFLARE_DEPLOY === "1";
+const workerVars: Record<string, string> = isCloudflareDeploy
+  ? {}
+  : { DATABASE_URL: String(process.env.DATABASE_URL || "") };
 
 const localBindingConfig = {
   main: "vinext/server/fetch-handler",
   compatibility_flags: ["nodejs_compat"],
-  vars: { DATABASE_URL: process.env.DATABASE_URL || "" },
+  vars: workerVars,
 };
 
 export default defineConfig(async () => {
