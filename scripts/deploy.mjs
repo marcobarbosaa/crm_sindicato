@@ -24,7 +24,7 @@ function run(command, args) {
 }
 
 // 1. Executa o build Vinext
-run(process.execPath, ["scripts/run-framework.mjs", "build"]);
+run("pnpm", ["exec", "vinext", "build"]);
 
 // 2. Verifica o que realmente foi gerado
 if (!existsSync("dist")) {
