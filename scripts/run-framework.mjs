@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 await import("./load-env.mjs");
 
@@ -11,15 +12,17 @@ if (!["dev", "build"].includes(command)) {
 console.log(`[run-framework] comando recebido: ${command}`);
 console.log(`[run-framework] iniciando vinext ${command}`);
 
+const vinextCli = fileURLToPath(
+  new URL("../node_modules/vinext/dist/cli.js", import.meta.url),
+);
 const vinextArgs = [
-  "exec",
-  "vinext",
+  vinextCli,
   command,
   ...(command === "dev" ? ["--port", "5173"] : []),
   ...args,
 ];
 
-const result = spawnSync("pnpm", vinextArgs, {
+const result = spawnSync(process.execPath, vinextArgs, {
   stdio: "inherit",
   shell: false,
   env: process.env,

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 function run(command, args) {
   console.log(`\n> ${command} ${args.join(" ")}\n`);
@@ -23,8 +24,11 @@ function run(command, args) {
   }
 }
 
-// 1. Executa o build Vinext
-run("pnpm", ["exec", "vinext", "build"]);
+// 1. Executa o build Vinext diretamente, sem depender do binário "pnpm" no PATH
+const vinextCli = fileURLToPath(
+  new URL("../node_modules/vinext/dist/cli.js", import.meta.url),
+);
+run(process.execPath, [vinextCli, "build"]);
 
 // 2. Verifica o que realmente foi gerado
 if (!existsSync("dist")) {
@@ -93,10 +97,18 @@ const wranglerConfig = wranglerConfigs[0];
 
 console.log(`\nUsando configuração: ${wranglerConfig}\n`);
 
-// 5. Faz o deploy
+// 5. Faz o deploy sempre no Worker de produção correto.
+// O "name" gravado em wrangler.json vem de package.json e pode divergir do
+// Worker realmente publicado; --name evita criar/atualizar um Worker errado.
+const PRODUCTION_WORKER_NAME = "crm-sindicato";
+
+console.log(`Publicando explicitamente no Worker "${PRODUCTION_WORKER_NAME}".`);
+
 run(process.execPath, [
   "node_modules/wrangler/bin/wrangler.js",
   "deploy",
   "--config",
   wranglerConfig,
+  "--name",
+  PRODUCTION_WORKER_NAME,
 ]);
