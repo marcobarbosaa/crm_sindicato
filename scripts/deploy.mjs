@@ -3,59 +3,100 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 function run(command, args) {
+  console.log(`\n> ${command} ${args.join(" ")}\n`);
+
   const result = spawnSync(command, args, {
     stdio: "inherit",
     shell: false,
-    env: { ...process.env, CLOUDFLARE_DEPLOY: "1" },
+    env: {
+      ...process.env,
+      CLOUDFLARE_DEPLOY: "1",
+    },
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
 }
 
+// 1. Executa o build Vinext
 run(process.execPath, ["scripts/run-framework.mjs", "build"]);
 
-const wranglerConfigs = [];
-console.log("Estrutura gerada pelo build em dist/:");
+// 2. Verifica o que realmente foi gerado
+if (!existsSync("dist")) {
+  throw new Error(
+    "O build terminou, mas o diretório dist/ não foi criado. " +
+    "O deploy foi interrompido."
+  );
+}
 
-function inspectDirectory(directory) {
-  const entries = readdirSync(directory, { withFileTypes: true })
-    .sort((a, b) => a.name.localeCompare(b.name));
+const wranglerConfigs = [];
+
+console.log("\nEstrutura gerada pelo build em dist/:\n");
+console.log("dist/");
+
+function inspectDirectory(directory, depth = 1) {
+  const entries = readdirSync(directory, {
+    withFileTypes: true,
+  }).sort((a, b) => a.name.localeCompare(b.name));
+
   for (const entry of entries) {
     const entryPath = join(directory, entry.name);
-    console.log(`  ${entryPath}${entry.isDirectory() ? "/" : ""}`);
+
+    console.log(
+      `${"  ".repeat(depth)}${entry.name}${entry.isDirectory() ? "/" : ""}`
+    );
+
     if (entry.isDirectory()) {
-      inspectDirectory(entryPath);
-    } else if (entry.isFile() && entry.name === "wrangler.json") {
+      inspectDirectory(entryPath, depth + 1);
+      continue;
+    }
+
+    if (entry.isFile() && entry.name === "wrangler.json") {
       wranglerConfigs.push(entryPath);
     }
   }
 }
 
-if (existsSync("dist")) {
-  console.log("  dist/");
-  inspectDirectory("dist");
-} else {
-  console.log("  (diretório dist/ não encontrado)");
-}
+// 3. Procura wrangler.json recursivamente
+inspectDirectory("dist");
+
+console.log("\nWrangler configs encontradas:");
 
 if (wranglerConfigs.length === 0) {
+  console.log("  nenhuma");
+
   throw new Error(
     "O build não gerou nenhum wrangler.json dentro de dist/. " +
-    "Consulte a estrutura encontrada no log acima. O deploy foi interrompido.",
-  );
-}
-if (wranglerConfigs.length > 1) {
-  throw new Error(
-    "O build gerou mais de um wrangler.json dentro de dist/. " +
-    "O deploy foi interrompido para evitar uma seleção arbitrária:\n" +
-    wranglerConfigs.map((config) => `  ${config}`).join("\n"),
+    "Veja a estrutura de dist/ impressa acima."
   );
 }
 
-console.log(`Configuração selecionada para deploy: ${wranglerConfigs[0]}`);
+for (const config of wranglerConfigs) {
+  console.log(`  ${config}`);
+}
+
+if (wranglerConfigs.length > 1) {
+  throw new Error(
+    "O build gerou mais de um wrangler.json. " +
+    "O deploy foi interrompido para evitar selecionar uma configuração incorreta.\n\n" +
+    wranglerConfigs.map((config) => `- ${config}`).join("\n")
+  );
+}
+
+// 4. Usa exatamente o wrangler.json produzido pelo build
+const wranglerConfig = wranglerConfigs[0];
+
+console.log(`\nUsando configuração: ${wranglerConfig}\n`);
+
+// 5. Faz o deploy
 run(process.execPath, [
   "node_modules/wrangler/bin/wrangler.js",
   "deploy",
   "--config",
-  wranglerConfigs[0],
+  wranglerConfig,
 ]);
