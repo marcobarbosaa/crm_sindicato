@@ -1,13 +1,19 @@
 import {
   boolean,
+  customType,
   integer,
   pgTable,
   serial,
   text,
-  timestamp,
   uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
+
+const timestampMs = customType<{ data: Date; driverData: number }>({
+  dataType: () => "bigint",
+  toDriver: (value) => value.getTime(),
+  fromDriver: (value) => new Date(Number(value)),
+});
 
 export const companies = pgTable(
   "companies",
@@ -37,10 +43,10 @@ export const companies = pgTable(
     companySize: text("company_size"),
     notes: text("notes"),
     status: text("status").notNull().default("NOT_CONTACTED"),
-    lastContactAt: timestamp("last_contact_at", { withTimezone: true }),
-    nextFollowUpAt: timestamp("next_follow_up_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+    lastContactAt: timestampMs("last_contact_at"),
+    nextFollowUpAt: timestampMs("next_follow_up_at"),
+    createdAt: timestampMs("created_at").notNull(),
+    updatedAt: timestampMs("updated_at").notNull(),
   },
   (table) => [
     index("idx_companies_owner_status").on(table.ownerId, table.status),
@@ -64,7 +70,7 @@ export const contacts = pgTable("contacts", {
   phone: text("phone"),
   role: text("role"),
   isPrimary: boolean("is_primary").notNull().default(false),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  createdAt: timestampMs("created_at").notNull(),
 });
 
 export const emailTemplates = pgTable("email_templates", {
@@ -73,8 +79,8 @@ export const emailTemplates = pgTable("email_templates", {
   name: text("name").notNull(),
   subject: text("subject").notNull(),
   body: text("body").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  createdAt: timestampMs("created_at").notNull(),
+  updatedAt: timestampMs("updated_at").notNull(),
 });
 
 export const emailMessages = pgTable("email_messages", {
@@ -96,8 +102,8 @@ export const emailMessages = pgTable("email_messages", {
   kind: text("kind").notNull().default("INDIVIDUAL"),
   providerMessageId: text("provider_message_id"),
   errorMessage: text("error_message"),
-  sentAt: timestamp("sent_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  sentAt: timestampMs("sent_at"),
+  createdAt: timestampMs("created_at").notNull(),
 });
 
 export const activityLogs = pgTable(
@@ -110,7 +116,7 @@ export const activityLogs = pgTable(
     }),
     type: text("type").notNull(),
     description: text("description").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdAt: timestampMs("created_at").notNull(),
   },
   (table) => [
     index("idx_activity_owner_created").on(table.ownerId, table.createdAt),
@@ -125,10 +131,10 @@ export const followUps = pgTable(
     companyId: integer("company_id")
       .notNull()
       .references(() => companies.id, { onDelete: "cascade" }),
-    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    dueAt: timestampMs("due_at").notNull(),
     status: text("status").notNull().default("PENDING"),
     note: text("note"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdAt: timestampMs("created_at").notNull(),
   },
   (table) => [index("idx_followups_owner_due").on(table.ownerId, table.dueAt)],
 );
@@ -144,7 +150,7 @@ export const importBatches = pgTable(
     updatedRows: integer("updated_rows").notNull().default(0),
     skippedRows: integer("skipped_rows").notNull().default(0),
     errorRows: integer("error_rows").notNull().default(0),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdAt: timestampMs("created_at").notNull(),
   },
   (table) => [
     index("idx_import_batches_owner_created").on(
@@ -163,8 +169,8 @@ export const emailAccounts = pgTable(
     email: text("email").notNull(),
     encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
     scopes: text("scopes").notNull().default(""),
-    connectedAt: timestamp("connected_at", { withTimezone: true }).notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+    connectedAt: timestampMs("connected_at").notNull(),
+    updatedAt: timestampMs("updated_at").notNull(),
   },
   (table) => [
     uniqueIndex("uq_email_accounts_owner_provider").on(
@@ -179,8 +185,8 @@ export const oauthStates = pgTable(
   {
     state: text("state").primaryKey(),
     ownerId: text("owner_id").notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    expiresAt: timestampMs("expires_at").notNull(),
+    createdAt: timestampMs("created_at").notNull(),
   },
   (table) => [index("idx_oauth_states_expires").on(table.expiresAt)],
 );
@@ -191,5 +197,5 @@ export const crmSettings = pgTable("crm_settings", {
   signature: text("signature").notNull().default(""),
   dailySendLimit: integer("daily_send_limit").notNull().default(100),
   timezone: text("timezone").notNull().default("America/Sao_Paulo"),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  updatedAt: timestampMs("updated_at").notNull(),
 });

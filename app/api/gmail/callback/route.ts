@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activityLogs, emailAccounts, oauthStates } from "@/db/schema";
 import { encryptToken, googleClientId, googleClientSecret } from "@/lib/gmail";
@@ -9,7 +9,7 @@ const GMAIL_SEND_SCOPE="https://www.googleapis.com/auth/gmail.send";
 export async function GET(request:NextRequest) {
   const url=new URL(request.url); const state=url.searchParams.get("state"); const code=url.searchParams.get("code"); const db=getDb();
   if(!state||!code)return NextResponse.redirect(new URL("/?gmail=cancelled",url.origin));
-  const [saved]=await db.select().from(oauthStates).where(and(eq(oauthStates.state,state),gt(oauthStates.expiresAt,new Date()))).limit(1);
+  const [saved]=await db.select().from(oauthStates).where(and(eq(oauthStates.state,state),gt(oauthStates.expiresAt,sql`${Date.now()}`))).limit(1);
   if(!saved)return NextResponse.redirect(new URL("/?gmail=invalid-state",url.origin));
   await db.delete(oauthStates).where(eq(oauthStates.state,state));
   try {

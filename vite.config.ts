@@ -7,6 +7,7 @@ const managedLinux = readExecutionProfile() === "managed-linux";
 const localBindingConfig = {
   main: "vinext/server/fetch-handler",
   compatibility_flags: ["nodejs_compat"],
+  vars: { DATABASE_URL: process.env.DATABASE_URL || "" },
 };
 
 export default defineConfig(async () => {
