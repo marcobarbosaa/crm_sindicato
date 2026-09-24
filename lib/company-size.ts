@@ -109,9 +109,9 @@ export function calculateCompanySize(
 }
 
 export function normalizeCnpj(value: unknown): string | null {
-  if (value === null || value === undefined || String(value).trim() === "")
-    return null;
-  return String(value).replace(/\D/g, "");
+  if (value === null || value === undefined) return null;
+  const digits = String(value).replace(/\D/g, "");
+  return digits.length === 0 ? null : digits;
 }
 
 export function isValidCnpj(value: unknown): boolean {

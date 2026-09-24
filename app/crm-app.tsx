@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import ExcelJS from "exceljs";
 import {
   Activity,
   Building2,
@@ -139,6 +140,21 @@ const statusClass: Record<string, string> = {
   INTERESTED: "green",
   NOT_INTERESTED: "red",
   CLOSED: "slate",
+};
+
+const normalizeText = (value?: string | null) =>
+  String(value ?? "").trim().toLowerCase();
+
+const normalizeDigits = (value?: string | null) =>
+  String(value ?? "").replace(/\D/g, "");
+
+const isFilled = (value?: string | null) => normalizeText(value).length > 0;
+const regionNumber = (value: unknown) => {
+  const match = String(value ?? "").match(/\d+/);
+  const region = Number(match?.[0]);
+  return Number.isInteger(region) && region >= 1 && region <= 17
+    ? region
+    : null;
 };
 
 export function CrmApp() {
@@ -515,33 +531,77 @@ function Companies({
 }) {
   const [region, setRegion] = useState("all");
   const [city, setCity] = useState("all");
+  const [emailFilter, setEmailFilter] = useState<"all" | "with" | "without">(
+    "all",
+  );
+  const [phoneFilter, setPhoneFilter] = useState<"all" | "with" | "without">(
+    "all",
+  );
+  const [mobileFilter, setMobileFilter] = useState<"all" | "with" | "without">(
+    "all",
+  );
+  const [companySizeFilter, setCompanySizeFilter] = useState<
+    "all" | "ME" | "EPP" | "Demais"
+  >("all");
   const [page, setPage] = useState(1);
+  const hasActiveFilters =
+    search ||
+    region !== "all" ||
+    city !== "all" ||
+    emailFilter !== "all" ||
+    phoneFilter !== "all" ||
+    mobileFilter !== "all" ||
+    companySizeFilter !== "all";
   const safeCompanies = Array.isArray(companies) ? companies : [];
+
   const regions = Array.from(
     new Set(
       safeCompanies
-        .map((company) => Number(company.region))
-        .filter(
-          (value) => Number.isInteger(value) && value >= 1 && value <= 17,
-        ),
+        .map((company) => regionNumber(company.region))
+        .filter((value): value is number => value !== null),
     ),
   ).sort((a, b) => a - b);
   const cities = Array.from(
     new Set(
       safeCompanies
-        .filter(
-          (company) =>
-            region === "all" || Number(company.region) === Number(region),
-        )
+        .filter((company) => {
+          if (region === "all") return true;
+          return String(regionNumber(company.region) ?? "") === region;
+        })
         .map((company) => String(company.city || "").trim())
         .filter(Boolean),
     ),
   ).sort((a, b) => a.localeCompare(b, "pt-BR"));
-  const filteredCompanies = safeCompanies.filter(
-    (company) =>
-      (region === "all" || Number(company.region) === Number(region)) &&
-      (city === "all" || String(company.city || "").trim() === city),
-  );
+  const filteredCompanies = safeCompanies.filter((company) => {
+    const matchesRegion =
+      region === "all" || String(regionNumber(company.region) ?? "") === region;
+    const matchesCity =
+      city === "all" || String(company.city || "").trim() === city;
+    const matchesEmail =
+      emailFilter === "all" ||
+      (emailFilter === "with"
+        ? isFilled(company.primaryEmail)
+        : !isFilled(company.primaryEmail));
+    const matchesPhone =
+      phoneFilter === "all" ||
+      (phoneFilter === "with" ? isFilled(company.phone) : !isFilled(company.phone));
+    const matchesMobile =
+      mobileFilter === "all" ||
+      (mobileFilter === "with"
+        ? isFilled(company.mobile)
+        : !isFilled(company.mobile));
+    const matchesSize =
+      companySizeFilter === "all" || company.companySize === companySizeFilter;
+
+    return (
+      matchesRegion &&
+      matchesCity &&
+      matchesEmail &&
+      matchesPhone &&
+      matchesMobile &&
+      matchesSize
+    );
+  });
   const pageSize = 50;
   const totalPages = Math.max(
     1,
@@ -551,7 +611,27 @@ function Companies({
     (page - 1) * pageSize,
     page * pageSize,
   );
-  useEffect(() => setPage(1), [region, city, search]);
+  const clearFilters = () => {
+    setSearch("");
+    setRegion("all");
+    setCity("all");
+    setEmailFilter("all");
+    setPhoneFilter("all");
+    setMobileFilter("all");
+    setCompanySizeFilter("all");
+  };
+  useEffect(
+    () => setPage(1),
+    [
+      region,
+      city,
+      search,
+      emailFilter,
+      phoneFilter,
+      mobileFilter,
+      companySizeFilter,
+    ],
+  );
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
@@ -570,14 +650,17 @@ function Companies({
       </section>
       <section className="panel companies-panel">
         <div className="table-tools">
-          <div className="search">
-            <Search />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nome, CNPJ, e-mail ou segmento"
-            />
+          <div className="companies-toolbar-primary">
+            <div className="search">
+              <Search />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por nome, CNPJ, e-mail ou segmento"
+              />
+            </div>
           </div>
+          <div className="company-filter-row">
           <Select
             value={region}
             onValueChange={(value) => {
@@ -614,14 +697,149 @@ function Companies({
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline">
-            <Tags />
-            Tags
+          <Select
+            value={emailFilter}
+            onValueChange={(value) => setEmailFilter(value as typeof emailFilter)}
+          >
+            <SelectTrigger className="filter-select">
+              <SelectValue placeholder="E-mail" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os e-mails</SelectItem>
+              <SelectItem value="with">Com e-mail</SelectItem>
+              <SelectItem value="without">Sem e-mail</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={phoneFilter}
+            onValueChange={(value) => setPhoneFilter(value as typeof phoneFilter)}
+          >
+            <SelectTrigger className="filter-select">
+              <SelectValue placeholder="Telefone" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os telefones</SelectItem>
+              <SelectItem value="with">Com telefone</SelectItem>
+              <SelectItem value="without">Sem telefone</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={mobileFilter}
+            onValueChange={(value) => setMobileFilter(value as typeof mobileFilter)}
+          >
+            <SelectTrigger className="filter-select">
+              <SelectValue placeholder="Celular" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os celulares</SelectItem>
+              <SelectItem value="with">Com celular</SelectItem>
+              <SelectItem value="without">Sem celular</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={companySizeFilter}
+            onValueChange={(value) =>
+              setCompanySizeFilter(value as typeof companySizeFilter)
+            }
+          >
+            <SelectTrigger className="filter-select">
+              <SelectValue placeholder="Porte" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os portes</SelectItem>
+              <SelectItem value="ME">ME</SelectItem>
+              <SelectItem value="EPP">EPP</SelectItem>
+              <SelectItem value="Demais">Demais</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" onClick={clearFilters} disabled={!hasActiveFilters}>
+            <X />
+            Limpar filtros
+          </Button>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              const rows = filteredCompanies.map((company) => ({
+                Nome: company.name,
+                "Nome fantasia": company.tradeName || "",
+                CNPJ: company.cnpj || "",
+                Email: company.primaryEmail || "",
+                Telefone: company.phone || "",
+                Celular: company.mobile || "",
+                Cidade: company.city || "",
+                Estado: company.state || "",
+                Região: company.region ? `Região ${company.region}` : "",
+                Porte: company.companySize || "",
+                Segmento: company.segment || "",
+              }));
+
+              const workbook = new ExcelJS.Workbook();
+              const worksheet = workbook.addWorksheet("Empresas filtradas", {
+                views: [{ state: "frozen", ySplit: 1 }],
+              });
+              const columns = Object.keys(rows[0] ?? {});
+
+              worksheet.addTable({
+                name: "EmpresasFiltradas",
+                ref: "A1",
+                headerRow: true,
+                style: {
+                  theme: "TableStyleMedium2",
+                  showRowStripes: true,
+                },
+                columns: columns.map((name) => ({ name, filterButton: true })),
+                rows: rows.map((row) => Object.values(row)),
+              });
+
+              worksheet.columns = [
+                { width: 36 },
+                { width: 34 },
+                { width: 18 },
+                { width: 30 },
+                { width: 18 },
+                { width: 18 },
+                { width: 22 },
+                { width: 12 },
+                { width: 14 },
+                { width: 14 },
+                { width: 28 },
+              ];
+              worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+              worksheet.getRow(1).fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FF1F4E78" },
+              };
+              worksheet.getColumn(3).numFmt = "@";
+              worksheet.getColumn(5).numFmt = "@";
+              worksheet.getColumn(6).numFmt = "@";
+
+              const content = await workbook.xlsx.writeBuffer();
+              const blob = new Blob([content], {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = `empresas-filtradas-${Date.now()}.xlsx`;
+              document.body.appendChild(link);
+              link.click();
+              link.remove();
+              URL.revokeObjectURL(url);
+            }}
+            disabled={!filteredCompanies.length}
+          >
+            <FileUp />
+            Exportar
           </Button>
           <Button variant="outline" onClick={onImport}>
             <FileUp />
             Importar
           </Button>
+          <span className="results-count">
+            {filteredCompanies.length} resultados
+          </span>
+          </div>
         </div>
         {loading ? (
           <div className="table-loading">
@@ -748,13 +966,25 @@ function Companies({
               <Building2 />
             </div>
             <h2>
-              {search || region !== "all" || city !== "all"
+              {search ||
+              region !== "all" ||
+              city !== "all" ||
+              emailFilter !== "all" ||
+              phoneFilter !== "all" ||
+              mobileFilter !== "all" ||
+              companySizeFilter !== "all"
                 ? "Nenhuma empresa encontrada"
                 : "Sua base começa aqui"}
             </h2>
             <p>
-              {search || region !== "all" || city !== "all"
-                ? "Tente ajustar a busca, a região ou a cidade."
+              {search ||
+              region !== "all" ||
+              city !== "all" ||
+              emailFilter !== "all" ||
+              phoneFilter !== "all" ||
+              mobileFilter !== "all" ||
+              companySizeFilter !== "all"
+                ? "Tente ajustar os filtros da base para encontrar registros compatíveis."
                 : "Cadastre manualmente ou importe sua planilha para começar."}
             </p>
             {!search && (
@@ -767,6 +997,12 @@ function Companies({
                   <FileUp />
                   Importar planilha
                 </Button>
+                {hasActiveFilters ? (
+                  <Button variant="outline" onClick={clearFilters}>
+                    <X />
+                    Limpar filtros
+                  </Button>
+                ) : null}
               </div>
             )}
           </div>
