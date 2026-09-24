@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activityLogs, emailAccounts, oauthStates } from "@/db/schema";
-import { encryptToken, googleClientId, googleClientSecret } from "@/lib/gmail";
+import { encryptToken, googleClientId, googleClientSecret, googleRedirectUri } from "@/lib/gmail";
 
 const GMAIL_SEND_SCOPE="https://www.googleapis.com/auth/gmail.send";
 
@@ -13,7 +13,8 @@ export async function GET(request:NextRequest) {
   if(!saved)return NextResponse.redirect(new URL("/?gmail=invalid-state",url.origin));
   await db.delete(oauthStates).where(eq(oauthStates.state,state));
   try {
-    const tokenResponse=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({code,client_id:googleClientId(),client_secret:googleClientSecret(),redirect_uri:`${url.origin}/api/gmail/callback`,grant_type:"authorization_code"})});
+    const redirectUri = googleRedirectUri(request.url);
+    const tokenResponse=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({code,client_id:googleClientId(),client_secret:googleClientSecret(),redirect_uri:redirectUri,grant_type:"authorization_code"})});
     const token=await tokenResponse.json() as {access_token?:string;refresh_token?:string;scope?:string;error_description?:string}; if(!tokenResponse.ok||!token.access_token)throw new Error(token.error_description||"Falha ao autorizar o Gmail.");
     const tokenInfoResponse=await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token.access_token)}`);
     const tokenInfo=await tokenInfoResponse.json() as {scope?:string};

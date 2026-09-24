@@ -1,5 +1,15 @@
-type RuntimeEnv = { GOOGLE_CLIENT_ID?:string; GOOGLE_CLIENT_SECRET?:string; TOKEN_ENCRYPTION_KEY?:string };
+type RuntimeEnv = { GOOGLE_CLIENT_ID?:string; GOOGLE_CLIENT_SECRET?:string; TOKEN_ENCRYPTION_KEY?:string; APP_URL?:string; NEXT_PUBLIC_APP_URL?:string; SITE_URL?:string; NEXT_PUBLIC_SITE_URL?:string };
 const runtime = () => process.env as RuntimeEnv;
+
+export const appBaseUrl = (requestUrl?: string) => {
+  const configured = runtime().APP_URL || runtime().NEXT_PUBLIC_APP_URL || runtime().SITE_URL || runtime().NEXT_PUBLIC_SITE_URL || "";
+  if (configured) return configured.replace(/\/$/, "");
+  if (requestUrl) return new URL(requestUrl).origin;
+  return "http://localhost:3000";
+};
+
+export const googleRedirectUri = (requestUrl?: string) => new URL("/api/gmail/callback", appBaseUrl(requestUrl)).toString();
+
 export const gmailConfigured = () => Boolean(runtime().GOOGLE_CLIENT_ID && runtime().GOOGLE_CLIENT_SECRET && runtime().TOKEN_ENCRYPTION_KEY);
 export const googleClientId = () => runtime().GOOGLE_CLIENT_ID || "";
 export const googleClientSecret = () => runtime().GOOGLE_CLIENT_SECRET || "";
