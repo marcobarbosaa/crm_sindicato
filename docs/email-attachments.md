@@ -36,12 +36,12 @@ Arquivos ficam no **Supabase Storage privado**, atrás de AttachmentStorage (put
    - SUPABASE_ATTACHMENTS_BUCKET=crm-email-attachments
    - ATTACHMENTS_CLEANUP_SECRET como secret longo, independente dos demais
    - Manter DATABASE_URL e as credenciais OAuth existentes.
-3. Configurar um agendador para executar, a cada 5 minutos, POST /api/attachments/cleanup, com Authorization: Bearer seguido do ATTACHMENTS_CLEANUP_SECRET.
-4. Monitorar resposta/execução da limpeza. Cada chamada processa até 25 arquivos; repetir chamadas enquanto houver lotes completos. O campo pending indica falhas dentro do lote, não o total global pendente.
+3. Publicar o Worker pelo deploy existente. O Cron Trigger nativo executa cleanupAttachments() diretamente a cada 5 minutos; veja a seção de Cron Trigger abaixo.
+4. Monitorar as execuções no Cloudflare. Cada evento processa até 25 arquivos; lotes restantes seguem nas próximas execuções. O campo pending indica falhas dentro do lote, não o total global pendente.
 
 O ID/chave de armazenamento é gerado no servidor; o nome fornecido nunca determina o caminho. O upload registra a linha no banco **antes** de armazenar o objeto. Assim, interrupções e uploads parcialmente concluídos permanecem rastreáveis. Uploads sem template expiram após 24 horas; arquivos removidos/substituídos ficam imediatamente elegíveis para limpeza. Exclusão no banco ocorre somente depois de remover o objeto do storage; falhas permanecem para retry. Locks transacionais coordenam salvamento, download e limpeza.
 
-A limpeza agendada é necessária: o navegador não é responsável por remover arquivos abandonados. Arquivos específicos de um envio expiram após 24 horas; o histórico conserva seus metadados. Templates ativos não expiram. O cron e o bucket não são criados automaticamente pelo deploy.
+A limpeza agendada é necessária: o navegador não é responsável por remover arquivos abandonados. Arquivos específicos de um envio expiram após 24 horas; o histórico conserva seus metadados. Templates ativos não expiram. O cron é registrado automaticamente pelo deploy. O bucket precisa ser criado separadamente.
 
 A identificação de proprietário existente (local-preview-user) foi preservada. Não foi introduzido um novo sistema de autenticação. O bucket deve continuar privado, com acesso via servidor.
 
@@ -121,3 +121,70 @@ Alterados:
 - app/api/templates/route.ts, app/api/emails/route.ts, app/api/email-batches/route.ts, app/api/companies/route.ts
 - db/schema.ts, supabase/schema.sql
 - lib/gmail.ts, .env.example
+
+## Cron Trigger nativo da Cloudflare
+
+O projeto usa Next.js sobre **Vinext 1.0.0-beta.5 + @cloudflare/vite-plugin**, com configuração programática em `vite.config.ts`. O build gera `dist/server/wrangler.json`; `scripts/deploy.mjs` publica esse artefato no Worker `crm-sindicato`. Não editar o arquivo gerado, pois será sobrescrito no próximo build.
+
+O entrypoint `worker.ts` delega `fetch(request, env, ctx)` ao handler oficial `vinext/server/fetch-handler`, preservando rotas HTTP, assets, RSC e o contexto da integração. No mesmo Worker, `scheduled` chama e aguarda `cleanupAttachments()` diretamente, sem HTTP interno e sem usar o secret do endpoint manual. Banco e storage continuam usando os bindings de `cloudflare:workers`.
+
+`vite.config.ts` define `triggers.crons: ["*/5 * * * *"]` e habilita observabilidade. O deploy registra o agendamento automaticamente; **não é necessário criar um Cron Trigger manualmente no painel**. Manter os secrets/variáveis de banco e storage descritos acima. `ATTACHMENTS_CLEANUP_SECRET` continua necessário somente para a rota POST manual, e não deve ser colocado na configuração pública nem nos comandos de build.
+
+Cada evento processa um lote da rotina existente (até 25 arquivos). O restante fica para a próxima execução; não existe um segundo algoritmo nem loop de limpeza. A rotina existente usa locks e SKIP LOCKED para coordenar execuções simultâneas. Um resultado com pending > 0 é registrado como parcial e faz o evento falhar; os registros ficam disponíveis para tentativas futuras. Falhas globais também rejeitam o evento. Os logs não incluem objetos env, secrets nem mensagens brutas dos provedores.
+
+### Testar localmente
+
+Use banco e bucket de teste: disparar o evento executa a limpeza real de arquivos expirados.
+
+1. Preencher as variáveis de desenvolvimento em .env e executar o build:
+   ```powershell
+   node scripts/run-framework.mjs build
+   ```
+2. Iniciar o Worker compilado com a simulação de agendamento:
+   ```powershell
+   node node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --env-file .env --local --test-scheduled --port 8787 --inspector-port 0
+   ```
+3. Em outro terminal, disparar a expressão exata:
+   ```powershell
+   curl.exe "http://127.0.0.1:8787/__scheduled?cron=%2A%2F5%20%2A%20%2A%20%2A%20%2A"
+   ```
+
+A versão instalada do Wrangler (4.92.0) oferece `/__scheduled` com `--test-scheduled`. Versões mais recentes documentam `/cdn-cgi/local/scheduled`; o comando acima segue a versão fixada no projeto. O runtime local não dispara a cada 5 minutos sozinho: invoque a rota de simulação. Uma falha no provedor deve gerar erro do evento e log failed/partial, sem remover os registros que precisam de retry.
+
+Também verificar uma página HTTP, por exemplo `http://127.0.0.1:8787/workspace`. O endpoint `POST /api/attachments/cleanup` continua disponível e deve retornar 401 sem um Bearer válido. Para usá-lo manualmente, fornecer `Authorization: Bearer <ATTACHMENTS_CLEANUP_SECRET>`; não colocar o secret na URL.
+
+Testes isolados, sem banco, storage ou exclusão real:
+```powershell
+node --test scripts/test-worker-cron.mjs
+node node_modules/typescript/bin/tsc --noEmit --incremental false
+```
+
+Os testes verificam delegação do request/env/context ao Vinext, execução direta e aguardada de cleanupAttachments(), falhas parciais e ausência de detalhes sensíveis nos erros.
+
+Para conferir o artefato exatamente no perfil usado pelo deploy, sem publicar:
+```powershell
+$env:CLOUDFLARE_DEPLOY = "1"
+node scripts/run-framework.mjs build
+Remove-Item Env:CLOUDFLARE_DEPLOY
+$config = Get-Content dist/server/wrangler.json -Raw | ConvertFrom-Json
+$config.triggers.crons
+```
+O resultado deve ser `*/5 * * * *`. O build nesse perfil não embute os valores locais de DATABASE_URL ou ATTACHMENTS_CLEANUP_SECRET.
+
+### Publicar e verificar no Cloudflare
+
+Publicar pelo comando existente:
+```powershell
+corepack pnpm deploy
+```
+
+Depois, em **Workers & Pages → crm-sindicato → Settings → Trigger Events**, verificar a expressão e acessar **View events**. A propagação do Cron Trigger pode levar até 15 minutos. Consultar também **Observability / Logs**, filtrando por `attachments.cleanup`, ou acompanhar via:
+```powershell
+node node_modules/wrangler/bin/wrangler.js tail crm-sindicato --format pretty
+```
+
+Cada execução registra started e completed/partial/failed, com cron, scheduledTime, duração e contagens quando disponíveis. pending representa apenas falhas no lote processado, não o total da fila. Configurar banco/bucket antes de publicar para que as execuções não falhem por falta de configuração.
+
+Se já houver um agendador externo chamando o endpoint manual, desativá-lo após confirmar o Cron Trigger nativo para evitar chamadas redundantes. O bucket e os secrets continuam sendo configurados separadamente; o agendamento é gerenciado pelo código. Alterações manuais nos Cron Triggers podem ser substituídas no próximo deploy.
+
+Referências: [configuração e monitoramento de Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/), [ciclo de vida do scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/), [configuração programática do plugin Vite](https://developers.cloudflare.com/workers/vite-plugin/reference/programmatic-configuration/).

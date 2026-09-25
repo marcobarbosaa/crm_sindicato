@@ -52,3 +52,9 @@ O runtime usa `DATABASE_URL` para conectar diretamente ao PostgreSQL do Supabase
 - `components/ui/`: componentes visuais reutilizáveis
 - `db/`: schema e acesso ao banco
 - `supabase/schema.sql`: estrutura PostgreSQL para o SQL Editor
+
+## Limpeza automática de anexos
+
+O mesmo Worker executa a limpeza a cada 5 minutos via Cron Trigger nativo, configurado em `vite.config.ts`. O entrypoint `worker.ts` preserva o HTTP do Vinext e chama `cleanupAttachments()` diretamente no evento scheduled. O deploy registra o cron automaticamente.
+
+Consulte [configuração, teste local e monitoramento](docs/email-attachments.md#cron-trigger-nativo-da-cloudflare). O endpoint POST protegido continua disponível para execução manual.

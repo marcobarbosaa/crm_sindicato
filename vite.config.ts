@@ -9,7 +9,9 @@ const workerVars: Record<string, string> = isCloudflareDeploy
   : { DATABASE_URL: String(process.env.DATABASE_URL || "") };
 
 const localBindingConfig = {
-  main: "vinext/server/fetch-handler",
+  main: "./worker.ts",
+  triggers: { crons: ["*/5 * * * *"] },
+  observability: { enabled: true },
   compatibility_flags: ["nodejs_compat"],
   vars: workerVars,
 };
