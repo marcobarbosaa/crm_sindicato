@@ -11,13 +11,16 @@ import {
 import { normalizeBrazilianPhone, normalizeWhatsAppStatus } from "@/lib/phone";
 import { isValidRegion, parseRegion } from "@/lib/region";
 
-const ownerId = (request: NextRequest) =>
-  "local-preview-user";
+const ownerId = (request: NextRequest) => "local-preview-user";
 
 export async function GET(request: NextRequest) {
   const db = getDb();
   const owner = ownerId(request);
   const search = request.nextUrl.searchParams.get("search")?.trim();
+  const requestedLimit = Number(request.nextUrl.searchParams.get("limit"));
+  const limit = Number.isInteger(requestedLimit)
+    ? Math.min(Math.max(requestedLimit, 1), 100)
+    : undefined;
   const condition = search
     ? and(
         eq(companies.ownerId, owner),
@@ -30,13 +33,14 @@ export async function GET(request: NextRequest) {
         ),
       )
     : eq(companies.ownerId, owner);
-  return NextResponse.json(
-    await db
-      .select()
-      .from(companies)
-      .where(condition)
-      .orderBy(desc(companies.createdAt)),
-  );
+
+  const query = db
+    .select()
+    .from(companies)
+    .where(condition)
+    .orderBy(desc(companies.createdAt));
+
+  return NextResponse.json(limit ? await query.limit(limit) : await query);
 }
 
 export async function POST(request: NextRequest) {
