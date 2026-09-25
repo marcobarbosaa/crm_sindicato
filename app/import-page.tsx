@@ -176,6 +176,7 @@ const normalize = (s: string) =>
 
 export function ImportPage({ onImported }: { onImported: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState(1);
   const [fileName, setFileName] = useState("");
   const [headers, setHeaders] = useState<string[]>([]);
@@ -224,44 +225,66 @@ export function ImportPage({ onImported }: { onImported: () => void }) {
     }),
     [review],
   );
-  async function readFile(file: File) {
-    if (!/\.(csv|xlsx|xls)$/i.test(file.name))
-      return toast.error("Escolha um arquivo CSV, XLSX ou XLS.");
+  async function readFiles(selectedFiles: Iterable<File>) {
+    const files = Array.from(selectedFiles).filter((file) =>
+      /\.(csv|xlsx|xls)$/i.test(file.name),
+    );
+    if (!files.length)
+      return toast.error("Escolha ao menos uma planilha CSV, XLSX ou XLS.");
     try {
       const XLSX = await import("xlsx");
-      const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data, { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const matrix = XLSX.utils.sheet_to_json<(string | number | null)[]>(
-        sheet,
-        { header: 1, defval: "", raw: false },
-      );
-      const header = (matrix[0] || [])
-        .map((v) => String(v).trim())
-        .filter(Boolean);
-      if (!header.length) throw new Error();
-      const rows = matrix
-        .slice(1)
-        .filter((r) => r.some((v) => String(v).trim()))
-        .map((values) =>
-          Object.fromEntries(
-            header.map((h, i) => [h, String(values[i] ?? "").trim()]),
-          ),
+      const headerByName = new Map<string, string>();
+      const rows: Row[] = [];
+
+      for (const file of files) {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const matrix = XLSX.utils.sheet_to_json<(string | number | null)[]>(
+          sheet,
+          { header: 1, defval: "", raw: false },
         );
+        const currentHeader = (matrix[0] || [])
+          .map((value) => String(value).trim())
+          .filter(Boolean);
+        if (!currentHeader.length)
+          return toast.error(`A planilha ${file.name} não possui cabeçalho.`);
+        for (const column of currentHeader) {
+          const normalizedColumn = normalize(column);
+          if (!headerByName.has(normalizedColumn))
+            headerByName.set(normalizedColumn, column);
+        }
+        rows.push(
+          ...matrix
+            .slice(1)
+            .filter((row) => row.some((value) => String(value).trim()))
+            .map((values) =>
+              Object.fromEntries(
+                currentHeader.map((column, index) => [
+                  column,
+                  String(values[index] ?? "").trim(),
+                ]),
+              ),
+            ),
+        );
+      }
       if (!rows.length)
-        return toast.error("A planilha não possui dados abaixo do cabeçalho.");
-      if (rows.length > 1000)
+        return toast.error("As planilhas não possuem dados abaixo do cabeçalho.");
+      if (rows.length > 4000)
         return toast.error(
-          "Esta versão aceita até 1.000 linhas por importação.",
+          "As planilhas somam mais de 4.000 linhas. Separe a importação em pastas menores.",
         );
       const auto: Partial<Record<Target, string>> = {};
+      const header = Array.from(headerByName.values());
       for (const field of fields) {
         const found = header.find((h) =>
           field.aliases.map(normalize).includes(normalize(h)),
         );
         if (found) auto[field.key] = found;
       }
-      setFileName(file.name);
+      setFileName(
+        files.length === 1 ? files[0].name : `${files.length} planilhas selecionadas`,
+      );
       setHeaders(header);
       setRawRows(rows);
       setMapping(auto);
@@ -348,6 +371,7 @@ export function ImportPage({ onImported }: { onImported: () => void }) {
     setSelectedRegion("");
     setResult(null);
     if (inputRef.current) inputRef.current.value = "";
+    if (folderInputRef.current) folderInputRef.current.value = "";
   }
   return (
     <>
@@ -373,7 +397,11 @@ export function ImportPage({ onImported }: { onImported: () => void }) {
         ))}
       </div>
       {step === 1 ? (
-        <UploadStep inputRef={inputRef} onFile={readFile} />
+        <UploadStep
+          inputRef={inputRef}
+          folderInputRef={folderInputRef}
+          onFiles={readFiles}
+        />
       ) : step === 2 ? (
         <MappingStep
           fileName={fileName}
@@ -409,10 +437,12 @@ export function ImportPage({ onImported }: { onImported: () => void }) {
 
 function UploadStep({
   inputRef,
-  onFile,
+  folderInputRef,
+  onFiles,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
-  onFile: (f: File) => void;
+  folderInputRef: React.RefObject<HTMLInputElement | null>;
+  onFiles: (files: Iterable<File>) => void;
 }) {
   const [drag, setDrag] = useState(false);
   return (
@@ -426,30 +456,46 @@ function UploadStep({
       onDrop={(e) => {
         e.preventDefault();
         setDrag(false);
-        const f = e.dataTransfer.files[0];
-        if (f) onFile(f);
+        if (e.dataTransfer.files.length) onFiles(e.dataTransfer.files);
       }}
     >
       <input
         ref={inputRef}
         type="file"
         accept=".csv,.xlsx,.xls"
+        multiple
         hidden
         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onFile(f);
+          if (e.target.files?.length) onFiles(e.target.files);
+        }}
+      />
+      <input
+        ref={(element) => {
+          folderInputRef.current = element;
+          element?.setAttribute("webkitdirectory", "");
+        }}
+        type="file"
+        accept=".csv,.xlsx,.xls"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files?.length) onFiles(e.target.files);
         }}
       />
       <div className="upload-icon">
         <UploadCloud />
       </div>
-      <h2>Selecione sua planilha</h2>
-      <p>Arraste o arquivo para cá ou escolha no computador.</p>
+      <h2>Selecione suas planilhas</h2>
+      <p>Arraste arquivos ou uma pasta, ou escolha-os no computador.</p>
       <Button onClick={() => inputRef.current?.click()}>
         <FileUp />
-        Escolher arquivo
+        Escolher planilhas
       </Button>
-      <small>Formatos aceitos: CSV, XLSX e XLS · até 1.000 linhas</small>
+      <Button variant="outline" onClick={() => folderInputRef.current?.click()}>
+        <FileSpreadsheet />
+        Escolher pasta
+      </Button>
+      <small>CSV, XLSX e XLS · até 4.000 linhas no total · mesmo cabeçalho</small>
       <div className="sheet-tip">
         <FileSpreadsheet />
         <div>

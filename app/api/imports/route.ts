@@ -57,15 +57,15 @@ export async function POST(request: NextRequest) {
   const db = getDb();
   const owner = ownerId(request);
   const body = (await request.json()) as ImportBody;
-  const rows = Array.isArray(body.rows) ? body.rows.slice(0, 1000) : [];
+  const rows = Array.isArray(body.rows) ? body.rows.slice(0, 4000) : [];
   if (!rows.length)
     return NextResponse.json(
       { error: "A planilha não possui linhas válidas." },
       { status: 400 },
     );
-  if ((body.rows?.length || 0) > 1000)
+  if ((body.rows?.length || 0) > 4000)
     return NextResponse.json(
-      { error: "Importe no máximo 1.000 empresas por vez." },
+      { error: "Importe no máximo 4.000 empresas por vez." },
       { status: 400 },
     );
   if (body.preview) {
