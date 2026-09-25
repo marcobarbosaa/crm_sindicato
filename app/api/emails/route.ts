@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { activityLogs, companies, crmSettings, emailAccounts, emailMessages } from "@/db/schema";
+import { activityLogs, companies, crmSettings, emailAccounts, emailMessages, emailTemplates } from "@/db/schema";
 import { decryptToken, encodeRawEmail, refreshAccessToken } from "@/lib/gmail";
 
-type SendInput={companyId?:number;contactId?:number;templateId?:number;recipient?:string;subject?:string;body?:string;confirmRepeat?:boolean};
+import { loadSendAttachments } from "@/lib/attachment-service";
+import { AttachmentError } from "@/lib/attachments";
+
+type SendInput={companyId?:number;contactId?:number;templateId?:number;recipient?:string;subject?:string;body?:string;confirmRepeat?:boolean;attachmentIds?:string[]};
 const GMAIL_SEND_SCOPE="https://www.googleapis.com/auth/gmail.send";
 const ownerId=(request:NextRequest)=>"local-preview-user";
 
@@ -31,7 +34,11 @@ export async function POST(request:NextRequest){
  if(settings?.senderName)account.email=`${settings.senderName.replace(/[\r\n<>]/g," ").trim()} <${account.email}>`;
  if(input.companyId){const [company]=await db.select({id:companies.id}).from(companies).where(and(eq(companies.id,Number(input.companyId)),eq(companies.ownerId,owner))).limit(1);if(!company)return NextResponse.json({error:"Empresa não encontrada."},{status:404});}
  if(!input.confirmRepeat){const [recent]=await db.select({id:emailMessages.id}).from(emailMessages).where(and(eq(emailMessages.ownerId,owner),eq(emailMessages.recipient,recipient),eq(emailMessages.subject,subject),gte(emailMessages.createdAt,sql`${Date.now()-10*60_000}`))).limit(1);if(recent)return NextResponse.json({error:"Um e-mail igual foi preparado recentemente. Confirme para enviar novamente.",duplicate:true},{status:409});}
- const now=new Date(); const [message]=await db.insert(emailMessages).values({ownerId:owner,companyId:input.companyId||null,contactId:input.contactId||null,templateId:input.templateId||null,recipient,subject,body,status:"QUEUED",kind:"INDIVIDUAL",createdAt:now}).returning();
- try{const accessToken=await refreshAccessToken(await decryptToken(account.encryptedRefreshToken));const response=await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send",{method:"POST",headers:{authorization:`Bearer ${accessToken}`,"content-type":"application/json"},body:JSON.stringify({raw:encodeRawEmail({from:account.email,to:recipient,subject,body})})});const result=await response.json() as {id?:string;error?:{message?:string}};if(!response.ok||!result.id)throw new Error(result.error?.message||"O Gmail recusou o envio.");const sentAt=new Date();await db.update(emailMessages).set({status:"SENT",providerMessageId:result.id,sentAt}).where(eq(emailMessages.id,message.id));await db.insert(activityLogs).values({ownerId:owner,companyId:input.companyId||null,type:"EMAIL_SENT",description:`E-mail enviado para ${recipient}`,createdAt:sentAt});return NextResponse.json({...message,status:"SENT",providerMessageId:result.id,sentAt});}
+ if(input.templateId){const [template]=await db.select({id:emailTemplates.id}).from(emailTemplates).where(and(eq(emailTemplates.id,Number(input.templateId)),eq(emailTemplates.ownerId,owner))).limit(1);if(!template)return NextResponse.json({error:"Template não encontrado."},{status:404});}
+ let attachments:Awaited<ReturnType<typeof loadSendAttachments>>;
+ try{attachments=await loadSendAttachments(owner,input.attachmentIds,input.templateId);}catch(error){return NextResponse.json({error:error instanceof AttachmentError?error.message:"Não foi possível recuperar os anexos. Tente novamente."},{status:error instanceof AttachmentError?400:503});}
+ const attachmentMetadata=attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}));
+ const now=new Date(); const [message]=await db.insert(emailMessages).values({ownerId:owner,companyId:input.companyId||null,contactId:input.contactId||null,templateId:input.templateId||null,recipient,subject,body,attachments:attachmentMetadata,status:"QUEUED",kind:"INDIVIDUAL",createdAt:now}).returning();
+ try{const accessToken=await refreshAccessToken(await decryptToken(account.encryptedRefreshToken));const response=await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send",{method:"POST",headers:{authorization:`Bearer ${accessToken}`,"content-type":"application/json"},body:JSON.stringify({raw:encodeRawEmail({from:account.email,to:recipient,subject,body,attachments})})});const result=await response.json() as {id?:string;error?:{message?:string}};if(!response.ok||!result.id)throw new Error(result.error?.message||"O Gmail recusou o envio.");const sentAt=new Date();await db.update(emailMessages).set({status:"SENT",providerMessageId:result.id,sentAt}).where(eq(emailMessages.id,message.id));await db.insert(activityLogs).values({ownerId:owner,companyId:input.companyId||null,type:"EMAIL_SENT",description:`E-mail enviado para ${recipient}`,createdAt:sentAt});return NextResponse.json({...message,status:"SENT",providerMessageId:result.id,sentAt});}
  catch(error){const reason=error instanceof Error?error.message:"Falha desconhecida";await db.update(emailMessages).set({status:"FAILED",errorMessage:reason}).where(eq(emailMessages.id,message.id));return NextResponse.json({error:`Não foi possível enviar: ${reason}`},{status:502});}
 }

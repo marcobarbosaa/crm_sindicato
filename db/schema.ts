@@ -2,6 +2,7 @@ import {
   boolean,
   customType,
   integer,
+  jsonb,
   pgTable,
   serial,
   text,
@@ -100,6 +101,7 @@ export const emailMessages = pgTable("email_messages", {
   body: text("body").notNull(),
   status: text("status").notNull().default("QUEUED"),
   kind: text("kind").notNull().default("INDIVIDUAL"),
+  attachments: jsonb("attachments").$type<import("../lib/attachments").Attachment[]>().notNull().default([]),
   providerMessageId: text("provider_message_id"),
   errorMessage: text("error_message"),
   sentAt: timestampMs("sent_at"),
@@ -199,3 +201,16 @@ export const crmSettings = pgTable("crm_settings", {
   timezone: text("timezone").notNull().default("America/Sao_Paulo"),
   updatedAt: timestampMs("updated_at").notNull(),
 });
+
+export const templateAttachments = pgTable("template_attachments", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  templateId: integer("template_id").references(() => emailTemplates.id, { onDelete: "set null" }),
+  name: text("name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  size: integer("size").notNull(),
+  storageKey: text("storage_key").notNull().unique(),
+  ready: boolean("ready").notNull().default(false),
+  createdAt: timestampMs("created_at").notNull(),
+  expiresAt: timestampMs("expires_at").notNull(),
+}, table => [index("idx_template_attachments_owner_template").on(table.ownerId, table.templateId), index("idx_template_attachments_expiry").on(table.expiresAt)]);

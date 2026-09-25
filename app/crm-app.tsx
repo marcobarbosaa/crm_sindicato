@@ -158,6 +158,7 @@ const regionNumber = (value: unknown) => {
 };
 
 export function CrmApp() {
+  const [templateDirty, setTemplateDirty] = useState(false);
   const [view, setView] = useState<View>("dashboard"),
     [menuOpen, setMenuOpen] = useState(false),
     [metrics, setMetrics] = useState<Metrics | null>(null),
@@ -202,12 +203,13 @@ export function CrmApp() {
     };
   }, []);
   const load = useCallback(async () => {
+    if (view !== "dashboard" && view !== "companies") return;
     const version = loadVersion.current;
     setLoading(true);
     try {
       const [m, c] = await Promise.all([
         fetch("/api/dashboard"),
-        fetch(`/api/companies?search=${encodeURIComponent(search)}`),
+        fetch(`/api/companies?search=${encodeURIComponent(search)}${view === "dashboard" ? "&limit=5" : ""}`),
       ]);
       if (!m.ok || !c.ok) throw new Error();
       if (version !== loadVersion.current) return;
@@ -219,7 +221,7 @@ export function CrmApp() {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [search, view]);
   useEffect(() => {
     const version = ++loadVersion.current;
     const timer = setTimeout(async () => {
@@ -264,6 +266,7 @@ export function CrmApp() {
               key={id}
               className={view === id ? "active" : ""}
               onClick={() => {
+                if (view === "templates" && id !== view && templateDirty && !confirm("Descartar as alterações não salvas deste template?")) return;
                 setView(id);
                 setMenuOpen(false);
               }}
@@ -345,7 +348,7 @@ export function CrmApp() {
           ) : view === "imports" ? (
             <ImportPage onImported={load} />
           ) : view === "templates" ? (
-            <TemplatesPage />
+            <TemplatesPage onDirtyChange={setTemplateDirty} />
           ) : view === "emails" ? (
             <EmailsPage />
           ) : (

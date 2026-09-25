@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq, like, or } from "drizzle-orm";
+import { and, desc, eq, ilike, like, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activityLogs, companies, contacts } from "@/db/schema";
 import {
@@ -26,11 +26,11 @@ export async function GET(request: NextRequest) {
     ? and(
         eq(companies.ownerId, owner),
         or(
-          like(companies.name, `%${search}%`),
-          like(companies.tradeName, `%${search}%`),
-          like(companies.cnpj, `%${search.replace(/\D/g, "")}%`),
-          like(companies.primaryEmail, `%${search}%`),
-          like(companies.segment, `%${search}%`),
+          ilike(companies.name, `%${search}%`),
+          ilike(companies.tradeName, `%${search}%`),
+          search.replace(/\D/g, "") ? like(companies.cnpj, `%${search.replace(/\D/g, "")}%`) : undefined,
+          ilike(companies.primaryEmail, `%${search}%`),
+          ilike(companies.segment, `%${search}%`),
         ),
       )
     : eq(companies.ownerId, owner);

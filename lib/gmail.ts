@@ -33,14 +33,40 @@ export async function refreshAccessToken(refreshToken:string) {
   return data.access_token;
 }
 
-export function encodeRawEmail({from,to,subject,body}:{from:string;to:string;subject:string;body:string}) {
+export type EmailAttachment = { name:string; mimeType:string; content:Uint8Array };
+function foldedBase64(bytes:Uint8Array) { return bytesToBase64(bytes).match(/.{1,76}/g)?.join("\r\n") || ""; }
+function encodedWords(value:string) {
+  const chunks:string[]=[];let chunk="";
+  for(const char of value){if(new TextEncoder().encode(chunk+char).length>42){chunks.push(chunk);chunk="";}chunk+=char;}
+  if(chunk)chunks.push(chunk);
+  return chunks.map(part=>"=?UTF-8?B?"+bytesToBase64(new TextEncoder().encode(part))+"?=").join("\r\n ");
+}
+function filenameParameters(name:string) {
+  const safe=name.replace(/[\r\n\x00-\x1f\x7f]/g," ").trim();
+  const encoded=encodeURIComponent(safe).replace(/['()*]/g,c=>"%"+c.charCodeAt(0).toString(16).toUpperCase());
+  const tokens=encoded.match(/%[0-9A-F]{2}|./g)||[],chunks:string[]=[];let chunk="";
+  for(const token of tokens){if(chunk.length+token.length>48){chunks.push(chunk);chunk="";}chunk+=token;}
+  if(chunk)chunks.push(chunk);
+  return chunks.map((part,i)=>"filename*"+i+"*="+(i===0?"UTF-8''":"")+part).join(";\r\n ");
+}
+export function encodeRawEmail({from,to,subject,body,attachments=[]}:{from:string;to:string;subject:string;body:string;attachments?:EmailAttachment[]}) {
   const safeFrom=from.replace(/[\r\n]/g," ").trim(),safeTo=to.replace(/[\r\n]/g,"").trim(),safeSubject=subject.replace(/[\r\n]+/g," ").trim();
-  const encodedSubject = `=?UTF-8?B?${bytesToBase64(new TextEncoder().encode(safeSubject))}?=`;
-  const message = [`From: ${safeFrom}`,`To: ${safeTo}`,`Subject: ${encodedSubject}`,"MIME-Version: 1.0",'Content-Type: text/plain; charset="UTF-8"','Content-Transfer-Encoding: base64',"",bytesToBase64(new TextEncoder().encode(body))].join("\r\n");
-  return toBase64Url(new TextEncoder().encode(message));
+  const mailbox=safeFrom.match(/^(.*?)\s*<([^<>]+)>$/);
+  const fromHeader=mailbox?encodedWords(mailbox[1])+" <"+mailbox[2]+">":safeFrom;
+  const headers=["From: "+fromHeader,"To: "+safeTo,"Subject: "+encodedWords(safeSubject),"MIME-Version: 1.0"];
+  const textPart=['Content-Type: text/plain; charset="UTF-8"',"Content-Transfer-Encoding: base64","",foldedBase64(new TextEncoder().encode(body))].join("\r\n");
+  if(!attachments.length)return Buffer.from([...headers,textPart].join("\r\n"),"utf8").toString("base64url");
+  const boundary="crm_"+crypto.randomUUID().replace(/-/g,"");
+  const parts=[...headers,'Content-Type: multipart/mixed; boundary="'+boundary+'"',"","--"+boundary,textPart];
+  for(const file of attachments){
+    if(!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(file.mimeType))throw new Error("Tipo de anexo inválido.");
+    parts.push("--"+boundary,"Content-Type: "+file.mimeType,"Content-Disposition: attachment;\r\n "+filenameParameters(file.name),"Content-Transfer-Encoding: base64","",foldedBase64(file.content));
+  }
+  parts.push("--"+boundary+"--","");
+  return Buffer.from(parts.join("\r\n"),"utf8").toString("base64url");
 }
 
-function bytesToBase64(bytes:Uint8Array) { let binary=""; for (const byte of bytes) binary+=String.fromCharCode(byte); return btoa(binary); }
+function bytesToBase64(bytes:Uint8Array) { return Buffer.from(bytes).toString("base64"); }
 function toBase64Url(bytes:Uint8Array) { return bytesToBase64(bytes).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,""); }
 function fromBase64Url(value:string) { const base64=value.replace(/-/g,"+").replace(/_/g,"/").padEnd(Math.ceil(value.length/4)*4,"="); const binary=atob(base64); return Uint8Array.from(binary,c=>c.charCodeAt(0)); }
 async function encryptionKey() { const secret=runtime().TOKEN_ENCRYPTION_KEY; if(!secret)throw new Error("Chave de criptografia ausente."); const raw=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(secret)); return crypto.subtle.importKey("raw",raw,"AES-GCM",false,["encrypt","decrypt"]); }

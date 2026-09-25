@@ -4,6 +4,9 @@ import { getDb } from "@/db";
 import { activityLogs, companies, contacts, crmSettings, emailAccounts, emailMessages, emailTemplates } from "@/db/schema";
 import { decryptToken, encodeRawEmail, refreshAccessToken } from "@/lib/gmail";
 
+import { loadSendAttachments } from "@/lib/attachment-service";
+import { AttachmentError } from "@/lib/attachments";
+
 const SEND_SCOPE="https://www.googleapis.com/auth/gmail.send";
 const LIMIT=20;
 const ownerId=(request:NextRequest)=>"local-preview-user";
@@ -21,6 +24,9 @@ export async function POST(request:NextRequest){
  if(settings?.senderName)account.email=`${settings.senderName.replace(/[\r\n<>]/g," ").trim()} <${account.email}>`;
  const [template]=await db.select().from(emailTemplates).where(and(eq(emailTemplates.id,Number(input.templateId)),eq(emailTemplates.ownerId,owner))).limit(1);
  if(!template)return NextResponse.json({error:"Selecione um template válido."},{status:400});
+ let attachments:Awaited<ReturnType<typeof loadSendAttachments>>;
+ try{attachments=await loadSendAttachments(owner,undefined,template.id);}catch(error){return NextResponse.json({error:error instanceof AttachmentError?error.message:"Não foi possível recuperar os anexos do template."},{status:400});}
+ const attachmentMetadata=attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}));
  const targets=await db.select().from(companies).where(and(eq(companies.ownerId,owner),inArray(companies.id,ids)));
  const accessToken=await refreshAccessToken(await decryptToken(account.encryptedRefreshToken));
  const results:{companyId:number;company:string;recipient:string;status:"SENT"|"FAILED"|"SKIPPED";error?:string}[]=[];
@@ -32,9 +38,9 @@ export async function POST(request:NextRequest){
   const subject=personalize(template.subject,data),messageBody=personalize(template.body,data),body=settings?.signature?`${messageBody}\n\n${settings.signature}`:messageBody;
     const [duplicate]=await db.select({id:emailMessages.id}).from(emailMessages).where(and(eq(emailMessages.ownerId,owner),eq(emailMessages.recipient,recipient),eq(emailMessages.subject,subject),gte(emailMessages.createdAt,sql`${Date.now()-24*60*60_000}`))).limit(1);
   if(duplicate){results.push({companyId:company.id,company:company.name,recipient,status:"SKIPPED",error:"E-mail igual enviado nas últimas 24 horas."});continue;}
-  const now=new Date(); const [message]=await db.insert(emailMessages).values({ownerId:owner,companyId:company.id,contactId:primary?.id||null,templateId:template.id,recipient,subject,body,status:"QUEUED",kind:"BATCH",createdAt:now}).returning();
+  const now=new Date(); const [message]=await db.insert(emailMessages).values({ownerId:owner,companyId:company.id,contactId:primary?.id||null,templateId:template.id,recipient,subject,body,attachments:attachmentMetadata,status:"QUEUED",kind:"BATCH",createdAt:now}).returning();
   try{
-   const response=await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send",{method:"POST",headers:{authorization:`Bearer ${accessToken}`,"content-type":"application/json"},body:JSON.stringify({raw:encodeRawEmail({from:account.email,to:recipient,subject,body})})});
+   const response=await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send",{method:"POST",headers:{authorization:`Bearer ${accessToken}`,"content-type":"application/json"},body:JSON.stringify({raw:encodeRawEmail({from:account.email,to:recipient,subject,body,attachments})})});
    const sent=await response.json() as {id?:string;error?:{message?:string}}; if(!response.ok||!sent.id)throw new Error(sent.error?.message||"O Gmail recusou o envio.");
    const sentAt=new Date(); await db.update(emailMessages).set({status:"SENT",providerMessageId:sent.id,sentAt}).where(eq(emailMessages.id,message.id));
    await db.insert(activityLogs).values({ownerId:owner,companyId:company.id,type:"EMAIL_SENT",description:`E-mail em lote enviado para ${recipient}`,createdAt:sentAt});
