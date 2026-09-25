@@ -8,7 +8,17 @@ type SendInput={companyId?:number;contactId?:number;templateId?:number;recipient
 const GMAIL_SEND_SCOPE="https://www.googleapis.com/auth/gmail.send";
 const ownerId=(request:NextRequest)=>"local-preview-user";
 
-export async function GET(request:NextRequest){const db=getDb(),owner=ownerId(request);return NextResponse.json(await db.select().from(emailMessages).where(eq(emailMessages.ownerId,owner)).orderBy(desc(emailMessages.createdAt)).limit(50));}
+export async function GET(request:NextRequest){
+ const db=getDb(),owner=ownerId(request);
+ const rows=await db
+  .select({message:emailMessages,companyName:companies.name})
+  .from(emailMessages)
+  .leftJoin(companies,eq(emailMessages.companyId,companies.id))
+  .where(eq(emailMessages.ownerId,owner))
+  .orderBy(desc(emailMessages.createdAt))
+  .limit(50);
+ return NextResponse.json(rows.map(({message,companyName})=>({...message,companyName:companyName||null})));
+}
 
 export async function POST(request:NextRequest){
  const db=getDb(),owner=ownerId(request),input=await request.json() as SendInput; const recipient=input.recipient?.trim().toLowerCase()||"",subject=input.subject?.trim()||"";let body=input.body?.trim()||"";
