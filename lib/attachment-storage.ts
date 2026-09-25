@@ -9,7 +9,7 @@ export function storageConfig(name: string) {
 }
 // Private persistent object storage; deliberately no filesystem fallback on Workers.
 export function attachmentStorage(): AttachmentStorage {
-  const url = storageConfig("SUPABASE_URL"), token = storageConfig("SUPABASE_SERVICE_ROLE_KEY"), bucket = storageConfig("SUPABASE_ATTACHMENTS_BUCKET");
+  const url = storageConfig("SUPABASE_URL"), token = storageConfig("SUPABASE_SERVICE_ROLE_KEY"), bucket = storageConfig("SUPABASE_ATTACHMENTS_BUCKET") || storageConfig("SUPABASE_ATTACHMENT_BUCKET");
   if (!url || !token || !bucket) throw new Error("Armazenamento de anexos não configurado. Configure o bucket privado do Supabase.");
   const base = url.replace(/\/$/, "") + "/storage/v1/object";
   const headers = { authorization: "Bearer " + token, apikey: token };
