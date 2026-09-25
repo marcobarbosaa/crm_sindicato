@@ -17,7 +17,8 @@ export async function GET(request: NextRequest) {
   const db = getDb();
   const owner = ownerId(request);
   const search = request.nextUrl.searchParams.get("search")?.trim();
-  const requestedLimit = Number(request.nextUrl.searchParams.get("limit"));
+  const limitParam = request.nextUrl.searchParams.get("limit");
+  const requestedLimit = limitParam === null ? NaN : Number(limitParam);
   const limit = Number.isInteger(requestedLimit)
     ? Math.min(Math.max(requestedLimit, 1), 100)
     : undefined;

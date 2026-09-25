@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ExcelJS from "exceljs";
 import {
   Activity,
@@ -166,9 +166,13 @@ export function CrmApp() {
     [search, setSearch] = useState(""),
     [dialogOpen, setDialogOpen] = useState(false),
     [selectedCompany, setSelectedCompany] = useState<number | null>(null);
+  const loadVersion = useRef(0);
   useEffect(() => {
     if (new URLSearchParams(location.search).has("gmail")) setView("emails");
   }, []);
+  useEffect(() => {
+    if (view === "companies") setSearch("");
+  }, [view]);
   useEffect(() => {
     const show = () =>
         toast.info(
@@ -198,6 +202,7 @@ export function CrmApp() {
     };
   }, []);
   const load = useCallback(async () => {
+    const version = loadVersion.current;
     setLoading(true);
     try {
       const [m, c] = await Promise.all([
@@ -205,6 +210,7 @@ export function CrmApp() {
         fetch(`/api/companies?search=${encodeURIComponent(search)}`),
       ]);
       if (!m.ok || !c.ok) throw new Error();
+      if (version !== loadVersion.current) return;
       setMetrics(await m.json());
       const companyData = await c.json();
       setCompanies(Array.isArray(companyData) ? companyData : []);
@@ -215,7 +221,10 @@ export function CrmApp() {
     }
   }, [search]);
   useEffect(() => {
-    const timer = setTimeout(load, 250);
+    const version = ++loadVersion.current;
+    const timer = setTimeout(async () => {
+      await load();
+    }, 250);
     return () => clearTimeout(timer);
   }, [load]);
   async function removeCompany(id: number, name: string) {
