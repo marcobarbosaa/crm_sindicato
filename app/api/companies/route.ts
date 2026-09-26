@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, count, desc, eq, ilike, isNotNull, isNull, like, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, isNotNull, isNull, like, ne, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activityLogs, companies, contacts } from "@/db/schema";
 import {
@@ -13,7 +13,7 @@ import { isValidRegion, parseRegion } from "@/lib/region";
 
 const ownerId = (request: NextRequest) => "local-preview-user";
 
-function presenceFilter(column: typeof companies.primaryEmail, value: string | null) {
+function presenceFilter(column: typeof companies.primaryEmail | typeof companies.phone | typeof companies.mobile, value: string | null) {
   if (value === "with") return and(isNotNull(column), ne(column, ""));
   if (value === "without") return or(isNull(column), eq(column, ""));
   return undefined;
@@ -33,8 +33,12 @@ export async function GET(request: NextRequest) {
   // Mantém compatibilidade com consumidores leves já existentes (dashboard,
   // autocomplete etc.). A tela Empresas usa explicitamente mode=page.
   const paginated = params.get("mode") === "page";
-  const page = Math.max(1, Number(params.get("page")) || 1);
-  const pageSize = Math.min(100, Math.max(10, Number(params.get("pageSize")) || 50));
+  const requestedPage = Number(params.get("page"));
+  const page = Number.isSafeInteger(requestedPage) ? Math.max(1, requestedPage) : 1;
+  const requestedPageSize = Number(params.get("pageSize"));
+  const pageSize = Number.isSafeInteger(requestedPageSize) && requestedPageSize > 0
+    ? Math.min(100, Math.max(10, requestedPageSize))
+    : 50;
   const region = Number(params.get("region"));
   const city = params.get("city")?.trim();
   const email = params.get("email");
@@ -87,7 +91,7 @@ export async function GET(request: NextRequest) {
     .select()
     .from(companies)
     .where(condition)
-    .orderBy(desc(companies.createdAt))
+    .orderBy(desc(companies.createdAt), desc(companies.id))
     .limit(pageSize)
     .offset((safePage - 1) * pageSize);
 
