@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ExcelJS from "exceljs";
+import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   Building2,
@@ -13,16 +12,12 @@ import {
   History,
   LayoutDashboard,
   Mail,
-  MessageCircle,
   Menu,
   MoreHorizontal,
   Plus,
-  Search,
   Send,
   Settings,
   Sparkles,
-  Tags,
-  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -45,17 +40,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast, Toaster } from "sonner";
+import { CompaniesPage } from "./companies-page";
 import { CompanyDetail } from "./company-detail";
 import { ImportPage } from "./import-page";
 import { TemplatesPage } from "./templates-page";
@@ -64,31 +52,8 @@ import { BatchEmailsPage } from "./batch-emails-page";
 import { FollowUpsPage } from "./followups-page";
 import { ContactsPage } from "./contacts-page";
 import { SettingsPage } from "./settings-page";
-import { formatCnpj, parseWorkforce } from "@/lib/company-size";
-import { formatBrazilianPhone } from "@/lib/phone";
+import { parseWorkforce } from "@/lib/company-size";
 
-type Company = {
-  id: number;
-  name: string;
-  tradeName?: string;
-  cnpj?: string;
-  website?: string;
-  primaryEmail?: string;
-  segment?: string;
-  region?: number | null;
-  city?: string;
-  state?: string;
-  phone?: string;
-  phoneWhatsAppStatus?: "UNKNOWN" | "YES" | "NO";
-  mobile?: string;
-  mobileWhatsAppStatus?: "UNKNOWN" | "YES" | "NO";
-  address?: string;
-  employeeCount?: number | null;
-  employeeRange?: string | null;
-  companySize?: string | null;
-  status: string;
-  createdAt: string;
-};
 type Metrics = {
   total: number;
   notContacted: number;
@@ -121,59 +86,18 @@ const nav = [
   ["followups", "Follow-ups", CalendarClock],
   ["settings", "Configurações", Settings],
 ] as const;
-const statusLabel: Record<string, string> = {
-  NOT_CONTACTED: "Não contatada",
-  CONTACTED: "Contatada",
-  WAITING_REPLY: "Aguardando resposta",
-  REPLIED: "Respondeu",
-  FOLLOW_UP: "Follow-up",
-  INTERESTED: "Interessada",
-  NOT_INTERESTED: "Não interessada",
-  CLOSED: "Encerrada",
-};
-const statusClass: Record<string, string> = {
-  NOT_CONTACTED: "neutral",
-  CONTACTED: "blue",
-  WAITING_REPLY: "amber",
-  REPLIED: "violet",
-  FOLLOW_UP: "orange",
-  INTERESTED: "green",
-  NOT_INTERESTED: "red",
-  CLOSED: "slate",
-};
-
-const normalizeText = (value?: string | null) =>
-  String(value ?? "").trim().toLowerCase();
-
-const normalizeDigits = (value?: string | null) =>
-  String(value ?? "").replace(/\D/g, "");
-
-const isFilled = (value?: string | null) => normalizeText(value).length > 0;
-const regionNumber = (value: unknown) => {
-  const match = String(value ?? "").match(/\d+/);
-  const region = Number(match?.[0]);
-  return Number.isInteger(region) && region >= 1 && region <= 17
-    ? region
-    : null;
-};
-
 export function CrmApp() {
   const [templateDirty, setTemplateDirty] = useState(false);
   const [view, setView] = useState<View>("dashboard"),
     [menuOpen, setMenuOpen] = useState(false),
     [metrics, setMetrics] = useState<Metrics | null>(null),
-    [companies, setCompanies] = useState<Company[]>([]),
+    [refreshKey, setRefreshKey] = useState(0),
     [loading, setLoading] = useState(true),
-    [search, setSearch] = useState(""),
     [dialogOpen, setDialogOpen] = useState(false),
     [selectedCompany, setSelectedCompany] = useState<number | null>(null);
-  const loadVersion = useRef(0);
   useEffect(() => {
     if (new URLSearchParams(location.search).has("gmail")) setView("emails");
   }, []);
-  useEffect(() => {
-    if (view === "companies") setSearch("");
-  }, [view]);
   useEffect(() => {
     const show = () =>
         toast.info(
@@ -202,33 +126,31 @@ export function CrmApp() {
       card?.removeEventListener("keydown", keyboard);
     };
   }, []);
-  const load = useCallback(async () => {
-    if (view !== "dashboard" && view !== "companies") return;
-    const version = loadVersion.current;
-    setLoading(true);
-    try {
-      const [m, c] = await Promise.all([
-        fetch("/api/dashboard"),
-        fetch(`/api/companies?search=${encodeURIComponent(search)}${view === "dashboard" ? "&limit=5" : ""}`),
-      ]);
-      if (!m.ok || !c.ok) throw new Error();
-      if (version !== loadVersion.current) return;
-      setMetrics(await m.json());
-      const companyData = await c.json();
-      setCompanies(Array.isArray(companyData) ? companyData : []);
-    } catch {
-      toast.error("Não foi possível carregar os dados agora.");
-    } finally {
-      setLoading(false);
-    }
-  }, [search, view]);
+  const refreshCompanies = useCallback(() => {
+    setRefreshKey((key) => key + 1);
+  }, []);
+  const closeCompany = useCallback(() => setSelectedCompany(null), []);
   useEffect(() => {
-    const version = ++loadVersion.current;
+    if (view !== "dashboard") return;
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
-      await load();
+      setLoading(true);
+      try {
+        const response = await fetch("/api/dashboard", { signal: controller.signal });
+        if (!response.ok) throw new Error();
+        const nextMetrics = await response.json() as Metrics;
+        if (!controller.signal.aborted) setMetrics(nextMetrics);
+      } catch {
+        if (!controller.signal.aborted) toast.error("Não foi possível carregar os dados agora.");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
     }, 250);
-    return () => clearTimeout(timer);
-  }, [load]);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [view, refreshKey]);
   async function removeCompany(id: number, name: string) {
     if (
       !confirm(`Excluir ${name}? O histórico relacionado também será removido.`)
@@ -237,7 +159,7 @@ export function CrmApp() {
     const r = await fetch(`/api/companies?id=${id}`, { method: "DELETE" });
     if (r.ok) {
       toast.success("Empresa excluída.");
-      load();
+      refreshCompanies();
     } else toast.error("Não foi possível excluir a empresa.");
   }
   const currentLabel = nav.find(([id]) => id === view)?.[1];
@@ -322,7 +244,7 @@ export function CrmApp() {
             <CompanyDialog
               open={dialogOpen}
               onOpenChange={setDialogOpen}
-              onSaved={load}
+              onSaved={refreshCompanies}
             />
           </div>
         </header>
@@ -335,18 +257,15 @@ export function CrmApp() {
               onCompanies={() => setView("companies")}
             />
           ) : view === "companies" ? (
-            <Companies
-              companies={companies}
-              loading={loading}
-              search={search}
-              setSearch={setSearch}
+            <CompaniesPage
+              refreshKey={refreshKey}
               onAdd={() => setDialogOpen(true)}
               onOpen={setSelectedCompany}
               onImport={() => setView("imports")}
               onRemove={removeCompany}
             />
           ) : view === "imports" ? (
-            <ImportPage onImported={load} />
+            <ImportPage onImported={refreshCompanies} />
           ) : view === "templates" ? (
             <TemplatesPage onDirtyChange={setTemplateDirty} />
           ) : view === "emails" ? (
@@ -358,8 +277,8 @@ export function CrmApp() {
       </main>
       <CompanyDetail
         companyId={selectedCompany}
-        onClose={() => setSelectedCompany(null)}
-        onChanged={load}
+        onClose={closeCompany}
+        onChanged={refreshCompanies}
       />
       <Toaster richColors position="bottom-right" />
     </div>
@@ -517,508 +436,6 @@ function Dashboard({
           </p>
         </div>
         <Button onClick={onAdd}>Cadastrar empresa</Button>
-      </section>
-    </>
-  );
-}
-
-function Companies({
-  companies,
-  loading,
-  search,
-  setSearch,
-  onAdd,
-  onOpen,
-  onImport,
-  onRemove,
-}: {
-  companies: Company[];
-  loading: boolean;
-  search: string;
-  setSearch: (s: string) => void;
-  onAdd: () => void;
-  onOpen: (id: number) => void;
-  onImport: () => void;
-  onRemove: (id: number, n: string) => void;
-}) {
-  const [region, setRegion] = useState("all");
-  const [city, setCity] = useState("all");
-  const [emailFilter, setEmailFilter] = useState<"all" | "with" | "without">(
-    "all",
-  );
-  const [phoneFilter, setPhoneFilter] = useState<"all" | "with" | "without">(
-    "all",
-  );
-  const [mobileFilter, setMobileFilter] = useState<"all" | "with" | "without">(
-    "all",
-  );
-  const [companySizeFilter, setCompanySizeFilter] = useState<
-    "all" | "ME" | "EPP" | "Demais"
-  >("all");
-  const [page, setPage] = useState(1);
-  const hasActiveFilters =
-    search ||
-    region !== "all" ||
-    city !== "all" ||
-    emailFilter !== "all" ||
-    phoneFilter !== "all" ||
-    mobileFilter !== "all" ||
-    companySizeFilter !== "all";
-  const safeCompanies = Array.isArray(companies) ? companies : [];
-
-  const regions = Array.from(
-    new Set(
-      safeCompanies
-        .map((company) => regionNumber(company.region))
-        .filter((value): value is number => value !== null),
-    ),
-  ).sort((a, b) => a - b);
-  const cities = Array.from(
-    new Set(
-      safeCompanies
-        .filter((company) => {
-          if (region === "all") return true;
-          return String(regionNumber(company.region) ?? "") === region;
-        })
-        .map((company) => String(company.city || "").trim())
-        .filter(Boolean),
-    ),
-  ).sort((a, b) => a.localeCompare(b, "pt-BR"));
-  const filteredCompanies = safeCompanies.filter((company) => {
-    const matchesRegion =
-      region === "all" || String(regionNumber(company.region) ?? "") === region;
-    const matchesCity =
-      city === "all" || String(company.city || "").trim() === city;
-    const matchesEmail =
-      emailFilter === "all" ||
-      (emailFilter === "with"
-        ? isFilled(company.primaryEmail)
-        : !isFilled(company.primaryEmail));
-    const matchesPhone =
-      phoneFilter === "all" ||
-      (phoneFilter === "with" ? isFilled(company.phone) : !isFilled(company.phone));
-    const matchesMobile =
-      mobileFilter === "all" ||
-      (mobileFilter === "with"
-        ? isFilled(company.mobile)
-        : !isFilled(company.mobile));
-    const matchesSize =
-      companySizeFilter === "all" || company.companySize === companySizeFilter;
-
-    return (
-      matchesRegion &&
-      matchesCity &&
-      matchesEmail &&
-      matchesPhone &&
-      matchesMobile &&
-      matchesSize
-    );
-  });
-  const pageSize = 50;
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredCompanies.length / pageSize),
-  );
-  const pagedCompanies = filteredCompanies.slice(
-    (page - 1) * pageSize,
-    page * pageSize,
-  );
-  const clearFilters = () => {
-    setSearch("");
-    setRegion("all");
-    setCity("all");
-    setEmailFilter("all");
-    setPhoneFilter("all");
-    setMobileFilter("all");
-    setCompanySizeFilter("all");
-  };
-  useEffect(
-    () => setPage(1),
-    [
-      region,
-      city,
-      search,
-      emailFilter,
-      phoneFilter,
-      mobileFilter,
-      companySizeFilter,
-    ],
-  );
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
-  return (
-    <>
-      <section className="page-intro compact">
-        <div>
-          <p className="eyebrow">BASE COMERCIAL</p>
-          <h1>Empresas</h1>
-          <p>Organize prospects, contatos e próximos passos.</p>
-        </div>
-        <Button onClick={onAdd}>
-          <Plus />
-          Nova empresa
-        </Button>
-      </section>
-      <section className="panel companies-panel">
-        <div className="table-tools">
-          <div className="companies-toolbar-primary">
-            <div className="search">
-              <Search />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por nome, CNPJ, e-mail ou segmento"
-              />
-            </div>
-          </div>
-          <div className="company-filter-row">
-          <Select
-            value={region}
-            onValueChange={(value) => {
-              setRegion(value);
-              setCity("all");
-            }}
-          >
-            <SelectTrigger className="filter-select">
-              <SelectValue placeholder="Todas as regiões" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as regiões</SelectItem>
-              {regions.map((value) => (
-                <SelectItem key={value} value={String(value)}>
-                  Região {value}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={city}
-            onValueChange={setCity}
-            disabled={region === "all"}
-          >
-            <SelectTrigger className="filter-select">
-              <SelectValue placeholder="Todas as cidades" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as cidades</SelectItem>
-              {cities.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {value}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={emailFilter}
-            onValueChange={(value) => setEmailFilter(value as typeof emailFilter)}
-          >
-            <SelectTrigger className="filter-select">
-              <SelectValue placeholder="E-mail" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os e-mails</SelectItem>
-              <SelectItem value="with">Com e-mail</SelectItem>
-              <SelectItem value="without">Sem e-mail</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={phoneFilter}
-            onValueChange={(value) => setPhoneFilter(value as typeof phoneFilter)}
-          >
-            <SelectTrigger className="filter-select">
-              <SelectValue placeholder="Telefone" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os telefones</SelectItem>
-              <SelectItem value="with">Com telefone</SelectItem>
-              <SelectItem value="without">Sem telefone</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={mobileFilter}
-            onValueChange={(value) => setMobileFilter(value as typeof mobileFilter)}
-          >
-            <SelectTrigger className="filter-select">
-              <SelectValue placeholder="Celular" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os celulares</SelectItem>
-              <SelectItem value="with">Com celular</SelectItem>
-              <SelectItem value="without">Sem celular</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={companySizeFilter}
-            onValueChange={(value) =>
-              setCompanySizeFilter(value as typeof companySizeFilter)
-            }
-          >
-            <SelectTrigger className="filter-select">
-              <SelectValue placeholder="Porte" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os portes</SelectItem>
-              <SelectItem value="ME">ME</SelectItem>
-              <SelectItem value="EPP">EPP</SelectItem>
-              <SelectItem value="Demais">Demais</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button variant="outline" onClick={clearFilters} disabled={!hasActiveFilters}>
-            <X />
-            Limpar filtros
-          </Button>
-          <Button
-            variant="outline"
-            onClick={async () => {
-              const rows = filteredCompanies.map((company) => ({
-                Nome: company.name,
-                "Nome fantasia": company.tradeName || "",
-                CNPJ: company.cnpj || "",
-                Email: company.primaryEmail || "",
-                Telefone: company.phone || "",
-                Celular: company.mobile || "",
-                Cidade: company.city || "",
-                Estado: company.state || "",
-                Região: company.region ? `Região ${company.region}` : "",
-                Porte: company.companySize || "",
-                Segmento: company.segment || "",
-              }));
-
-              const workbook = new ExcelJS.Workbook();
-              const worksheet = workbook.addWorksheet("Empresas filtradas", {
-                views: [{ state: "frozen", ySplit: 1 }],
-              });
-              const columns = Object.keys(rows[0] ?? {});
-
-              worksheet.addTable({
-                name: "EmpresasFiltradas",
-                ref: "A1",
-                headerRow: true,
-                style: {
-                  theme: "TableStyleMedium2",
-                  showRowStripes: true,
-                },
-                columns: columns.map((name) => ({ name, filterButton: true })),
-                rows: rows.map((row) => Object.values(row)),
-              });
-
-              worksheet.columns = [
-                { width: 36 },
-                { width: 34 },
-                { width: 18 },
-                { width: 30 },
-                { width: 18 },
-                { width: 18 },
-                { width: 22 },
-                { width: 12 },
-                { width: 14 },
-                { width: 14 },
-                { width: 28 },
-              ];
-              worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
-              worksheet.getRow(1).fill = {
-                type: "pattern",
-                pattern: "solid",
-                fgColor: { argb: "FF1F4E78" },
-              };
-              worksheet.getColumn(3).numFmt = "@";
-              worksheet.getColumn(5).numFmt = "@";
-              worksheet.getColumn(6).numFmt = "@";
-
-              const content = await workbook.xlsx.writeBuffer();
-              const blob = new Blob([content], {
-                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-              });
-              const url = URL.createObjectURL(blob);
-              const link = document.createElement("a");
-              link.href = url;
-              link.download = `empresas-filtradas-${Date.now()}.xlsx`;
-              document.body.appendChild(link);
-              link.click();
-              link.remove();
-              URL.revokeObjectURL(url);
-            }}
-            disabled={!filteredCompanies.length}
-          >
-            <FileUp />
-            Exportar
-          </Button>
-          <Button variant="outline" onClick={onImport}>
-            <FileUp />
-            Importar
-          </Button>
-          <span className="results-count">
-            {filteredCompanies.length} resultados
-          </span>
-          </div>
-        </div>
-        {loading ? (
-          <div className="table-loading">
-            <Skeleton />
-            <Skeleton />
-            <Skeleton />
-          </div>
-        ) : filteredCompanies.length ? (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Empresa</TableHead>
-                  <TableHead>Contato</TableHead>
-                  <TableHead>Porte</TableHead>
-                  <TableHead>Localização</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="w-12" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pagedCompanies.map((c) => (
-                  <TableRow
-                    key={c.id}
-                    className="clickable-row"
-                    onClick={() => onOpen(c.id)}
-                  >
-                    <TableCell>
-                      <div className="company-cell">
-                        <span>{c.name.slice(0, 2).toUpperCase()}</span>
-                        <div>
-                          <strong>{c.name}</strong>
-                          <small>
-                            {formatCnpj(c.cnpj) ||
-                              c.tradeName ||
-                              "CNPJ não informado"}
-                          </small>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="stacked">
-                        <span>{c.primaryEmail || "Sem e-mail"}</span>
-                        <small className="phone-with-status">
-                          {formatBrazilianPhone(c.mobile || c.phone) ||
-                            "Sem telefone"}
-                          {(c.mobile && c.mobileWhatsAppStatus === "YES") ||
-                          (!c.mobile && c.phoneWhatsAppStatus === "YES") ? (
-                            <span
-                              className="whatsapp-confirmed"
-                              title="WhatsApp confirmado"
-                              aria-label="WhatsApp confirmado"
-                            >
-                              <MessageCircle />
-                            </span>
-                          ) : null}
-                        </small>
-                      </div>
-                    </TableCell>
-                    <TableCell>{c.companySize || "—"}</TableCell>
-                    <TableCell>
-                      {[
-                        c.region ? `Região ${c.region}` : null,
-                        [c.city, c.state].filter(Boolean).join(", "),
-                      ]
-                        .filter(Boolean)
-                        .join(" • ") || "—"}
-                    </TableCell>
-                    <TableCell>
-                      <span className={`status ${statusClass[c.status]}`}>
-                        {statusLabel[c.status] || c.status}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <button
-                        className="row-action"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onRemove(c.id, c.name);
-                        }}
-                        aria-label={`Excluir ${c.name}`}
-                      >
-                        <Trash2 />
-                      </button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="companies-pagination">
-              <span>
-                Exibindo {(page - 1) * pageSize + 1}–
-                {Math.min(page * pageSize, filteredCompanies.length)} de{" "}
-                {filteredCompanies.length}
-              </span>
-              <div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setPage((value) => Math.max(1, value - 1))}
-                  disabled={page === 1}
-                >
-                  Anterior
-                </Button>
-                <span>
-                  Página {page} de {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setPage((value) => Math.min(totalPages, value + 1))
-                  }
-                  disabled={page === totalPages}
-                >
-                  Próxima
-                </Button>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="empty-table">
-            <div>
-              <Building2 />
-            </div>
-            <h2>
-              {search ||
-              region !== "all" ||
-              city !== "all" ||
-              emailFilter !== "all" ||
-              phoneFilter !== "all" ||
-              mobileFilter !== "all" ||
-              companySizeFilter !== "all"
-                ? "Nenhuma empresa encontrada"
-                : "Sua base começa aqui"}
-            </h2>
-            <p>
-              {search ||
-              region !== "all" ||
-              city !== "all" ||
-              emailFilter !== "all" ||
-              phoneFilter !== "all" ||
-              mobileFilter !== "all" ||
-              companySizeFilter !== "all"
-                ? "Tente ajustar os filtros da base para encontrar registros compatíveis."
-                : "Cadastre manualmente ou importe sua planilha para começar."}
-            </p>
-            {!search && (
-              <div className="empty-actions">
-                <Button onClick={onAdd}>
-                  <Plus />
-                  Cadastrar empresa
-                </Button>
-                <Button variant="outline" onClick={onImport}>
-                  <FileUp />
-                  Importar planilha
-                </Button>
-                {hasActiveFilters ? (
-                  <Button variant="outline" onClick={clearFilters}>
-                    <X />
-                    Limpar filtros
-                  </Button>
-                ) : null}
-              </div>
-            )}
-          </div>
-        )}
       </section>
     </>
   );
