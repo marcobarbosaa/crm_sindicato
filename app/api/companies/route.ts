@@ -11,7 +11,7 @@ import {
 import { normalizeBrazilianPhone, normalizeWhatsAppStatus } from "@/lib/phone";
 import { isValidRegion, parseRegion } from "@/lib/region";
 
-const ownerId = (request: NextRequest) => "local-preview-user";
+const ownerId = (_request: NextRequest) => "local-preview-user";
 
 function presenceFilter(column: typeof companies.primaryEmail | typeof companies.phone | typeof companies.mobile, value: string | null) {
   if (value === "with") return and(isNotNull(column), ne(column, ""));
