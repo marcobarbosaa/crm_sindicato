@@ -1,6 +1,4 @@
 import vinextHandler from "vinext/server/fetch-handler";
-import { cleanupAttachments } from "./lib/attachment-service";
-import { findDueCampaigns, processCampaignBatch } from "./lib/campaign-runner";
 
 const MAX_CAMPAIGNS_PER_RUN = 5;
 
@@ -20,6 +18,13 @@ export default {
 
     console.info({ ...event, status: "started" });
     try {
+      // Carregue as rotinas de manutenção somente quando o cron realmente rodar.
+      // Isso mantém o entrypoint HTTP do Vinext leve durante o `pnpm dev`.
+      const [{ findDueCampaigns, processCampaignBatch }, { cleanupAttachments }] = await Promise.all([
+        import("./lib/campaign-runner"),
+        import("./lib/attachment-service"),
+      ]);
+
       // Campanhas vencidas são processadas pelo servidor, independentemente de
       // qualquer página estar aberta no navegador.
       const due = await findDueCampaigns(MAX_CAMPAIGNS_PER_RUN);
