@@ -9,8 +9,8 @@ const clean = (value: unknown) => typeof value === "string" ? value.trim() : "";
 export async function GET() {
   const db = getDb();
   const templates = await db.select().from(emailTemplates).where(eq(emailTemplates.ownerId, owner)).orderBy(desc(emailTemplates.updatedAt));
-  const files = templates.length ? await db.select().from(templateAttachments).where(and(eq(templateAttachments.ownerId, owner), inArray(templateAttachments.templateId, templates.map(t => t.id)))) : [];
-  return NextResponse.json(templates.map(t => ({ ...t, attachments: files.filter(f => f.templateId === t.id).map(attachmentMetadata) })));
+  const files = templates.length ? await db.select().from(templateAttachments).where(and(eq(templateAttachments.ownerId, owner), inArray(templateAttachments.templateId, templates.map(t => Number(t.id))))) : [];
+  return NextResponse.json(templates.map(t => ({ ...t, attachments: files.filter(f => Number(f.templateId) === Number(t.id)).map(attachmentMetadata) })));
 }
 async function save(request: NextRequest, id?: number) {
   try {
