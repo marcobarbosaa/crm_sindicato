@@ -203,7 +203,10 @@ export function ImportPage({ onImported }: { onImported: () => void }) {
     } catch {}
   }, []);
   useEffect(() => {
-    void loadHistory();
+    const timer = setTimeout(() => {
+      void loadHistory();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [loadHistory]);
   const mappedRows = useMemo(
     () =>
