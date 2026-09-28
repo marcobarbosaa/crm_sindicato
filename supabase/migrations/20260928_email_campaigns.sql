@@ -34,6 +34,8 @@ create table if not exists public.email_campaign_recipients (
   personalization jsonb not null default '{}'::jsonb,
   status text not null default 'PENDING' check (status in ('PENDING','PROCESSING','SENT','FAILED','SKIPPED')),
   attempts integer not null default 0 check (attempts >= 0),
+  processing_started_at bigint,
+  message_id bigint,
   error_message text,
   provider_message_id text,
   sent_at bigint,
@@ -42,11 +44,17 @@ create table if not exists public.email_campaign_recipients (
   constraint uq_campaign_recipient_company unique (campaign_id, company_id)
 );
 
+-- Mantém bancos que já executaram uma versão anterior desta migration
+-- compatíveis com o schema atual da aplicação.
+alter table public.email_campaign_recipients add column if not exists processing_started_at bigint;
+alter table public.email_campaign_recipients add column if not exists message_id bigint;
+
 alter table public.email_messages add column if not exists campaign_id bigint references public.email_campaigns(id) on delete set null;
 create index if not exists idx_email_campaigns_owner_created on public.email_campaigns(owner_id, created_at desc);
 create index if not exists idx_email_campaigns_owner_status on public.email_campaigns(owner_id, status);
 create index if not exists idx_email_campaigns_due on public.email_campaigns(status, next_run_at);
 create index if not exists idx_campaign_recipients_campaign_status on public.email_campaign_recipients(campaign_id, status);
+create index if not exists idx_campaign_recipients_processing on public.email_campaign_recipients(status, processing_started_at);
 create index if not exists idx_email_messages_campaign on public.email_messages(campaign_id);
 alter table public.email_campaigns enable row level security;
 alter table public.email_campaign_recipients enable row level security;
