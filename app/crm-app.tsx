@@ -88,16 +88,18 @@ const nav = [
 ] as const;
 export function CrmApp() {
   const [templateDirty, setTemplateDirty] = useState(false);
-  const [view, setView] = useState<View>("dashboard"),
+  const [view, setView] = useState<View>(() =>
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("gmail")
+      ? "emails"
+      : "dashboard",
+  ),
     [menuOpen, setMenuOpen] = useState(false),
     [metrics, setMetrics] = useState<Metrics | null>(null),
     [refreshKey, setRefreshKey] = useState(0),
     [loading, setLoading] = useState(true),
     [dialogOpen, setDialogOpen] = useState(false),
     [selectedCompany, setSelectedCompany] = useState<number | null>(null);
-  useEffect(() => {
-    if (new URLSearchParams(location.search).has("gmail")) setView("emails");
-  }, []);
   useEffect(() => {
     const show = () =>
         toast.info(
