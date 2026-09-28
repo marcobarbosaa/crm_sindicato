@@ -16,201 +16,23 @@ const timestampMs = customType<{ data: Date; driverData: number }>({
   fromDriver: (value) => new Date(Number(value)),
 });
 
-export const companies = pgTable(
-  "companies",
-  {
-    id: serial("id").primaryKey(),
-    ownerId: text("owner_id").notNull(),
-    name: text("name").notNull(),
-    tradeName: text("trade_name"),
-    cnpj: text("cnpj"),
-    website: text("website"),
-    segment: text("segment"),
-    region: integer("region"),
-    city: text("city"),
-    state: text("state"),
-    address: text("address"),
-    phone: text("phone"),
-    phoneWhatsAppStatus: text("phone_whatsapp_status")
-      .notNull()
-      .default("UNKNOWN"),
-    mobile: text("mobile"),
-    mobileWhatsAppStatus: text("mobile_whatsapp_status")
-      .notNull()
-      .default("UNKNOWN"),
-    primaryEmail: text("primary_email"),
-    employeeCount: integer("employee_count"),
-    employeeRange: text("employee_range"),
-    companySize: text("company_size"),
-    notes: text("notes"),
-    status: text("status").notNull().default("NOT_CONTACTED"),
-    lastContactAt: timestampMs("last_contact_at"),
-    nextFollowUpAt: timestampMs("next_follow_up_at"),
-    createdAt: timestampMs("created_at").notNull(),
-    updatedAt: timestampMs("updated_at").notNull(),
-  },
-  (table) => [
-    index("idx_companies_owner_status").on(table.ownerId, table.status),
-    index("idx_companies_owner_region_city").on(
-      table.ownerId,
-      table.region,
-      table.city,
-    ),
-    index("idx_companies_owner_email").on(table.ownerId, table.primaryEmail),
-    uniqueIndex("uq_companies_owner_cnpj").on(table.ownerId, table.cnpj),
-  ],
-);
+export const companies = pgTable("companies", { id: serial("id").primaryKey(), ownerId: text("owner_id").notNull(), name: text("name").notNull(), tradeName: text("trade_name"), cnpj: text("cnpj"), website: text("website"), segment: text("segment"), region: integer("region"), city: text("city"), state: text("state"), address: text("address"), phone: text("phone"), phoneWhatsAppStatus: text("phone_whatsapp_status").notNull().default("UNKNOWN"), mobile: text("mobile"), mobileWhatsAppStatus: text("mobile_whatsapp_status").notNull().default("UNKNOWN"), primaryEmail: text("primary_email"), employeeCount: integer("employee_count"), employeeRange: text("employee_range"), companySize: text("company_size"), notes: text("notes"), status: text("status").notNull().default("NOT_CONTACTED"), lastContactAt: timestampMs("last_contact_at"), nextFollowUpAt: timestampMs("next_follow_up_at"), createdAt: timestampMs("created_at").notNull(), updatedAt: timestampMs("updated_at").notNull() }, table => [index("idx_companies_owner_status").on(table.ownerId, table.status), index("idx_companies_owner_region_city").on(table.ownerId, table.region, table.city), index("idx_companies_owner_email").on(table.ownerId, table.primaryEmail), uniqueIndex("uq_companies_owner_cnpj").on(table.ownerId, table.cnpj)]);
+export const contacts = pgTable("contacts", { id: serial("id").primaryKey(), companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }), name: text("name"), email: text("email"), phone: text("phone"), role: text("role"), isPrimary: boolean("is_primary").notNull().default(false), createdAt: timestampMs("created_at").notNull() });
+export const emailTemplates = pgTable("email_templates", { id: serial("id").primaryKey(), ownerId: text("owner_id").notNull(), name: text("name").notNull(), subject: text("subject").notNull(), body: text("body").notNull(), createdAt: timestampMs("created_at").notNull(), updatedAt: timestampMs("updated_at").notNull() });
 
-export const contacts = pgTable("contacts", {
-  id: serial("id").primaryKey(),
-  companyId: integer("company_id")
-    .notNull()
-    .references(() => companies.id, { onDelete: "cascade" }),
-  name: text("name"),
-  email: text("email"),
-  phone: text("phone"),
-  role: text("role"),
-  isPrimary: boolean("is_primary").notNull().default(false),
-  createdAt: timestampMs("created_at").notNull(),
-});
+export const emailCampaigns = pgTable("email_campaigns", {
+  id: serial("id").primaryKey(), ownerId: text("owner_id").notNull(), name: text("name").notNull(), templateId: integer("template_id").references(() => emailTemplates.id, { onDelete: "set null" }), status: text("status").notNull().default("DRAFT"), audience: jsonb("audience").$type<{ region?: number; city?: string; companySize?: string; companyStatus?: string; groupIds?: number[] }>().notNull().default({}), total: integer("total").notNull().default(0), pending: integer("pending").notNull().default(0), sent: integer("sent").notNull().default(0), failed: integer("failed").notNull().default(0), skipped: integer("skipped").notNull().default(0), batchSize: integer("batch_size").notNull().default(25), intervalMinutes: integer("interval_minutes").notNull().default(10), startedAt: timestampMs("started_at"), completedAt: timestampMs("completed_at"), createdAt: timestampMs("created_at").notNull(), updatedAt: timestampMs("updated_at").notNull()
+}, table => [index("idx_email_campaigns_owner_created").on(table.ownerId, table.createdAt), index("idx_email_campaigns_owner_status").on(table.ownerId, table.status)]);
 
-export const emailTemplates = pgTable("email_templates", {
-  id: serial("id").primaryKey(),
-  ownerId: text("owner_id").notNull(),
-  name: text("name").notNull(),
-  subject: text("subject").notNull(),
-  body: text("body").notNull(),
-  createdAt: timestampMs("created_at").notNull(),
-  updatedAt: timestampMs("updated_at").notNull(),
-});
+export const emailCampaignRecipients = pgTable("email_campaign_recipients", {
+  id: serial("id").primaryKey(), campaignId: integer("campaign_id").notNull().references(() => emailCampaigns.id, { onDelete: "cascade" }), companyId: integer("company_id").references(() => companies.id, { onDelete: "set null" }), contactId: integer("contact_id").references(() => contacts.id, { onDelete: "set null" }), recipient: text("recipient").notNull(), companyName: text("company_name").notNull(), personalization: jsonb("personalization").$type<Record<string,string>>().notNull().default({}), status: text("status").notNull().default("PENDING"), attempts: integer("attempts").notNull().default(0), errorMessage: text("error_message"), providerMessageId: text("provider_message_id"), sentAt: timestampMs("sent_at"), createdAt: timestampMs("created_at").notNull(), updatedAt: timestampMs("updated_at").notNull()
+}, table => [index("idx_campaign_recipients_campaign_status").on(table.campaignId, table.status), uniqueIndex("uq_campaign_recipient_company").on(table.campaignId, table.companyId)]);
 
-export const emailMessages = pgTable("email_messages", {
-  id: serial("id").primaryKey(),
-  ownerId: text("owner_id").notNull(),
-  companyId: integer("company_id").references(() => companies.id, {
-    onDelete: "set null",
-  }),
-  contactId: integer("contact_id").references(() => contacts.id, {
-    onDelete: "set null",
-  }),
-  templateId: integer("template_id").references(() => emailTemplates.id, {
-    onDelete: "set null",
-  }),
-  recipient: text("recipient").notNull(),
-  subject: text("subject").notNull(),
-  body: text("body").notNull(),
-  status: text("status").notNull().default("QUEUED"),
-  kind: text("kind").notNull().default("INDIVIDUAL"),
-  attachments: jsonb("attachments").$type<import("../lib/attachments").Attachment[]>().notNull().default([]),
-  providerMessageId: text("provider_message_id"),
-  errorMessage: text("error_message"),
-  sentAt: timestampMs("sent_at"),
-  createdAt: timestampMs("created_at").notNull(),
-});
-
-export const activityLogs = pgTable(
-  "activity_logs",
-  {
-    id: serial("id").primaryKey(),
-    ownerId: text("owner_id").notNull(),
-    companyId: integer("company_id").references(() => companies.id, {
-      onDelete: "cascade",
-    }),
-    type: text("type").notNull(),
-    description: text("description").notNull(),
-    createdAt: timestampMs("created_at").notNull(),
-  },
-  (table) => [
-    index("idx_activity_owner_created").on(table.ownerId, table.createdAt),
-  ],
-);
-
-export const followUps = pgTable(
-  "follow_ups",
-  {
-    id: serial("id").primaryKey(),
-    ownerId: text("owner_id").notNull(),
-    companyId: integer("company_id")
-      .notNull()
-      .references(() => companies.id, { onDelete: "cascade" }),
-    dueAt: timestampMs("due_at").notNull(),
-    status: text("status").notNull().default("PENDING"),
-    note: text("note"),
-    createdAt: timestampMs("created_at").notNull(),
-  },
-  (table) => [index("idx_followups_owner_due").on(table.ownerId, table.dueAt)],
-);
-
-export const importBatches = pgTable(
-  "import_batches",
-  {
-    id: serial("id").primaryKey(),
-    ownerId: text("owner_id").notNull(),
-    fileName: text("file_name").notNull(),
-    totalRows: integer("total_rows").notNull(),
-    importedRows: integer("imported_rows").notNull(),
-    updatedRows: integer("updated_rows").notNull().default(0),
-    skippedRows: integer("skipped_rows").notNull().default(0),
-    errorRows: integer("error_rows").notNull().default(0),
-    createdAt: timestampMs("created_at").notNull(),
-  },
-  (table) => [
-    index("idx_import_batches_owner_created").on(
-      table.ownerId,
-      table.createdAt,
-    ),
-  ],
-);
-
-export const emailAccounts = pgTable(
-  "email_accounts",
-  {
-    id: serial("id").primaryKey(),
-    ownerId: text("owner_id").notNull(),
-    provider: text("provider").notNull().default("GMAIL"),
-    email: text("email").notNull(),
-    encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
-    scopes: text("scopes").notNull().default(""),
-    connectedAt: timestampMs("connected_at").notNull(),
-    updatedAt: timestampMs("updated_at").notNull(),
-  },
-  (table) => [
-    uniqueIndex("uq_email_accounts_owner_provider").on(
-      table.ownerId,
-      table.provider,
-    ),
-  ],
-);
-
-export const oauthStates = pgTable(
-  "oauth_states",
-  {
-    state: text("state").primaryKey(),
-    ownerId: text("owner_id").notNull(),
-    expiresAt: timestampMs("expires_at").notNull(),
-    createdAt: timestampMs("created_at").notNull(),
-  },
-  (table) => [index("idx_oauth_states_expires").on(table.expiresAt)],
-);
-
-export const crmSettings = pgTable("crm_settings", {
-  ownerId: text("owner_id").primaryKey(),
-  senderName: text("sender_name").notNull().default(""),
-  signature: text("signature").notNull().default(""),
-  dailySendLimit: integer("daily_send_limit").notNull().default(100),
-  timezone: text("timezone").notNull().default("America/Sao_Paulo"),
-  updatedAt: timestampMs("updated_at").notNull(),
-});
-
-export const templateAttachments = pgTable("template_attachments", {
-  id: text("id").primaryKey(),
-  ownerId: text("owner_id").notNull(),
-  templateId: integer("template_id").references(() => emailTemplates.id, { onDelete: "set null" }),
-  name: text("name").notNull(),
-  mimeType: text("mime_type").notNull(),
-  size: integer("size").notNull(),
-  storageKey: text("storage_key").notNull().unique(),
-  ready: boolean("ready").notNull().default(false),
-  createdAt: timestampMs("created_at").notNull(),
-  expiresAt: timestampMs("expires_at").notNull(),
-}, table => [index("idx_template_attachments_owner_template").on(table.ownerId, table.templateId), index("idx_template_attachments_expiry").on(table.expiresAt)]);
+export const emailMessages = pgTable("email_messages", { id: serial("id").primaryKey(), ownerId: text("owner_id").notNull(), companyId: integer("company_id").references(() => companies.id, { onDelete: "set null" }), contactId: integer("contact_id").references(() => contacts.id, { onDelete: "set null" }), templateId: integer("template_id").references(() => emailTemplates.id, { onDelete: "set null" }), campaignId: integer("campaign_id").references(() => emailCampaigns.id, { onDelete: "set null" }), recipient: text("recipient").notNull(), subject: text("subject").notNull(), body: text("body").notNull(), status: text("status").notNull().default("QUEUED"), kind: text("kind").notNull().default("INDIVIDUAL"), attachments: jsonb("attachments").$type<import("../lib/attachments").Attachment[]>().notNull().default([]), providerMessageId: text("provider_message_id"), errorMessage: text("error_message"), sentAt: timestampMs("sent_at"), createdAt: timestampMs("created_at").notNull() });
+export const activityLogs = pgTable("activity_logs", { id: serial("id").primaryKey(), ownerId: text("owner_id").notNull(), companyId: integer("company_id").references(() => companies.id, { onDelete: "cascade" }), type: text("type").notNull(), description: text("description").notNull(), createdAt: timestampMs("created_at").notNull() }, table => [index("idx_activity_owner_created").on(table.ownerId, table.createdAt)]);
+export const followUps = pgTable("follow_ups", { id: serial("id").primaryKey(), ownerId: text("owner_id").notNull(), companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }), dueAt: timestampMs("due_at").notNull(), status: text("status").notNull().default("PENDING"), note: text("note"), createdAt: timestampMs("created_at").notNull() }, table => [index("idx_followups_owner_due").on(table.ownerId, table.dueAt)]);
+export const importBatches = pgTable("import_batches", { id: serial("id").primaryKey(), ownerId: text("owner_id").notNull(), fileName: text("file_name").notNull(), totalRows: integer("total_rows").notNull(), importedRows: integer("imported_rows").notNull(), updatedRows: integer("updated_rows").notNull().default(0), skippedRows: integer("skipped_rows").notNull().default(0), errorRows: integer("error_rows").notNull().default(0), createdAt: timestampMs("created_at").notNull() }, table => [index("idx_import_batches_owner_created").on(table.ownerId, table.createdAt)]);
+export const emailAccounts = pgTable("email_accounts", { id: serial("id").primaryKey(), ownerId: text("owner_id").notNull(), provider: text("provider").notNull().default("GMAIL"), email: text("email").notNull(), encryptedRefreshToken: text("encrypted_refresh_token").notNull(), scopes: text("scopes").notNull().default(""), connectedAt: timestampMs("connected_at").notNull(), updatedAt: timestampMs("updated_at").notNull() }, table => [uniqueIndex("uq_email_accounts_owner_provider").on(table.ownerId, table.provider)]);
+export const oauthStates = pgTable("oauth_states", { state: text("state").primaryKey(), ownerId: text("owner_id").notNull(), expiresAt: timestampMs("expires_at").notNull(), createdAt: timestampMs("created_at").notNull() }, table => [index("idx_oauth_states_expires").on(table.expiresAt)]);
+export const crmSettings = pgTable("crm_settings", { ownerId: text("owner_id").primaryKey(), senderName: text("sender_name").notNull().default(""), signature: text("signature").notNull().default(""), dailySendLimit: integer("daily_send_limit").notNull().default(100), timezone: text("timezone").notNull().default("America/Sao_Paulo"), updatedAt: timestampMs("updated_at").notNull() });
+export const templateAttachments = pgTable("template_attachments", { id: text("id").primaryKey(), ownerId: text("owner_id").notNull(), templateId: integer("template_id").references(() => emailTemplates.id, { onDelete: "set null" }), name: text("name").notNull(), mimeType: text("mime_type").notNull(), size: integer("size").notNull(), storageKey: text("storage_key").notNull().unique(), ready: boolean("ready").notNull().default(false), createdAt: timestampMs("created_at").notNull(), expiresAt: timestampMs("expires_at").notNull() }, table => [index("idx_template_attachments_owner_template").on(table.ownerId, table.templateId), index("idx_template_attachments_expiry").on(table.expiresAt)]);
