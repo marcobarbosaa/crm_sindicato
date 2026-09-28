@@ -21,7 +21,7 @@ export function TemplatesPage({onDirtyChange}:{onDirtyChange?:(dirty:boolean)=>v
   const dirty=JSON.stringify(draft)!==JSON.stringify(editing?asDraft(editing):blank),busy=saving||uploading;
   useEffect(()=>{onDirtyChange?.(dirty||busy);return()=>onDirtyChange?.(false);},[dirty,busy,onDirtyChange]);
   useEffect(()=>{if(!dirty&&!busy)return;const prevent=(e:BeforeUnloadEvent)=>{e.preventDefault();};window.addEventListener("beforeunload",prevent);return()=>window.removeEventListener("beforeunload",prevent);},[dirty,busy]);
-  const load=useCallback(()=>fetch("/api/templates").then(async r=>{
+  const load=useCallback(()=>fetch("/api/templates",{cache:"no-store"}).then(async r=>{
     if(!r.ok)throw new Error();
     setTemplates(await r.json() as Template[]);setLoadError(false);
   }).catch(()=>{setLoadError(true);toast.error("Não foi possível carregar os templates.");}).finally(()=>setLoading(false)),[]);
