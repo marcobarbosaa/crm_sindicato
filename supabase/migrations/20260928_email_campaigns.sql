@@ -16,6 +16,8 @@ create table if not exists public.email_campaigns (
   skipped integer not null default 0 check (skipped >= 0),
   batch_size integer not null default 25 check (batch_size between 1 and 100),
   interval_minutes integer not null default 10 check (interval_minutes >= 1),
+  next_run_at bigint,
+  lock_until bigint,
   started_at bigint,
   completed_at bigint,
   created_at bigint not null,
@@ -41,15 +43,11 @@ create table if not exists public.email_campaign_recipients (
 );
 
 alter table public.email_messages add column if not exists campaign_id bigint references public.email_campaigns(id) on delete set null;
-
 create index if not exists idx_email_campaigns_owner_created on public.email_campaigns(owner_id, created_at desc);
 create index if not exists idx_email_campaigns_owner_status on public.email_campaigns(owner_id, status);
+create index if not exists idx_email_campaigns_due on public.email_campaigns(status, next_run_at);
 create index if not exists idx_campaign_recipients_campaign_status on public.email_campaign_recipients(campaign_id, status);
 create index if not exists idx_email_messages_campaign on public.email_messages(campaign_id);
-
 alter table public.email_campaigns enable row level security;
 alter table public.email_campaign_recipients enable row level security;
-
--- O CRM continua acessando o banco somente pelo servidor/service-role.
--- Nenhuma policy pública é criada.
 commit;
