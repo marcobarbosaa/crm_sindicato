@@ -25,6 +25,12 @@ function classifyGmailFailure(status:number,message:string){
  return {retryable,reason:message||`Gmail retornou HTTP ${status}.`};
 }
 
+async function campaignWasPaused(campaignId:number){
+ const db=getDb();
+ const [campaign]=await db.select({status:emailCampaigns.status}).from(emailCampaigns).where(eq(emailCampaigns.id,campaignId)).limit(1);
+ return campaign?.status==="PAUSED";
+}
+
 export async function reconcileStaleRecipients(campaignId?:number){
  const db=getDb(),cutoff=new Date(Date.now()-STALE_PROCESSING_MS);
  const stale=await db.select().from(emailCampaignRecipients).where(and(eq(emailCampaignRecipients.status,"PROCESSING"),lte(emailCampaignRecipients.processingStartedAt,cutoff),campaignId?eq(emailCampaignRecipients.campaignId,campaignId):undefined)).orderBy(asc(emailCampaignRecipients.id)).limit(100);
@@ -60,13 +66,18 @@ export async function processCampaignBatch(ownerId:string,campaignId:number){
  const db=getDb();const claimed=await claimCampaign(ownerId,campaignId);if(!claimed)return {campaignId,processed:0,completed:false,paused:false,locked:true};
  try{
   await reconcileStaleRecipients(campaignId);const batch=await getCampaignBatch(ownerId,campaignId);
-  if(batch.remaining<=0){const nextRunAt=new Date(batch.nextDailyWindow.getTime()+60_000);await db.update(emailCampaigns).set({status:"RUNNING",nextRunAt,lockUntil:null,updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));return {campaignId,processed:0,completed:false,paused:false,waitingDailyLimit:true,locked:false,nextRunAt,remainingToday:0};}
-  if(!batch.recipients.length){const counters=await syncCampaignCounters(campaignId);if(counters.processing>0||counters.uncertain>0){await db.update(emailCampaigns).set({status:"PAUSED",lockUntil:null,nextRunAt:null,updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));return {campaignId,processed:0,completed:false,paused:true,needsReview:true,unresolved:counters.processing+counters.uncertain,locked:false};}await db.update(emailCampaigns).set({status:"COMPLETED",pending:0,lockUntil:null,nextRunAt:null,completedAt:new Date(),updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));return {campaignId,processed:0,completed:true,paused:false,locked:false,remainingToday:batch.remaining};}
+  if(batch.remaining<=0){
+   const paused=await campaignWasPaused(campaignId);
+   if(paused){await db.update(emailCampaigns).set({lockUntil:null,updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));return {campaignId,processed:0,completed:false,paused:true,waitingDailyLimit:false,locked:false};}
+   const nextRunAt=new Date(batch.nextDailyWindow.getTime()+60_000);await db.update(emailCampaigns).set({status:"RUNNING",nextRunAt,lockUntil:null,updatedAt:new Date()}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.status,"RUNNING")));return {campaignId,processed:0,completed:false,paused:false,waitingDailyLimit:true,locked:false,nextRunAt,remainingToday:0};
+  }
+  if(!batch.recipients.length){const counters=await syncCampaignCounters(campaignId);if(counters.processing>0||counters.uncertain>0){await db.update(emailCampaigns).set({status:"PAUSED",lockUntil:null,nextRunAt:null,updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));return {campaignId,processed:0,completed:false,paused:true,needsReview:true,unresolved:counters.processing+counters.uncertain,locked:false};}await db.update(emailCampaigns).set({status:"COMPLETED",pending:0,lockUntil:null,nextRunAt:null,completedAt:new Date(),updatedAt:new Date()}).where(and(eq(emailCampaigns.id,campaignId),or(eq(emailCampaigns.status,"READY"),eq(emailCampaigns.status,"RUNNING"))));return {campaignId,processed:0,completed:true,paused:false,locked:false,remainingToday:batch.remaining};}
   const [account]=await db.select().from(emailAccounts).where(and(eq(emailAccounts.ownerId,ownerId),eq(emailAccounts.provider,"GMAIL"))).limit(1);if(!account||!account.scopes.split(/\s+/).includes(SEND_SCOPE))throw new Error("Conecte o Gmail com permissão de envio antes de continuar.");
   const [template]=await db.select().from(emailTemplates).where(and(eq(emailTemplates.id,Number(batch.campaign.templateId)),eq(emailTemplates.ownerId,ownerId))).limit(1);if(!template)throw new Error("O template da campanha não está mais disponível.");
   const attachments=await loadSendAttachments(ownerId,undefined,template.id);const metadata=attachments.map(({id,name,mimeType,size})=>({id,name,mimeType,size}));const accessToken=await refreshAccessToken(await decryptToken(account.encryptedRefreshToken));let from=account.email;if(batch.settings?.senderName)from=`${batch.settings.senderName.replace(/[\r\n<>]/g," ").trim()} <${account.email}>`;
-  await db.update(emailCampaigns).set({status:"RUNNING",startedAt:batch.campaign.startedAt||new Date(),updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));let sent=0,failed=0,skipped=0,retried=0;
+  await db.update(emailCampaigns).set({startedAt:batch.campaign.startedAt||new Date(),updatedAt:new Date()}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.status,"RUNNING")));let sent=0,failed=0,skipped=0,retried=0;
   for(const target of batch.recipients){
+   if(await campaignWasPaused(campaignId))break;
    const data=target.personalization||{},subject=personalize(template.subject,data),messageBody=personalize(template.body,data),body=batch.settings?.signature?`${messageBody}\n\n${batch.settings.signature}`:messageBody;
    const [duplicate]=await db.select({id:emailMessages.id}).from(emailMessages).where(and(eq(emailMessages.ownerId,ownerId),eq(emailMessages.recipient,target.recipient),eq(emailMessages.subject,subject),eq(emailMessages.status,"SENT"),gte(emailMessages.createdAt,sql`${Date.now()-24*60*60_000}`))).limit(1);
    if(duplicate){await db.update(emailCampaignRecipients).set({status:"SKIPPED",processingStartedAt:null,errorMessage:"E-mail igual enviado nas últimas 24 horas.",updatedAt:new Date()}).where(eq(emailCampaignRecipients.id,target.id));skipped++;continue;}
@@ -78,7 +89,10 @@ export async function processCampaignBatch(ownerId:string,campaignId:number){
     const sentAt=new Date();await db.update(emailMessages).set({status:"SENT",providerMessageId:result.id,sentAt}).where(eq(emailMessages.id,message.id));await db.update(emailCampaignRecipients).set({status:"SENT",providerMessageId:result.id,sentAt,processingStartedAt:null,errorMessage:null,updatedAt:sentAt}).where(eq(emailCampaignRecipients.id,target.id));if(target.companyId)await db.insert(activityLogs).values({ownerId,companyId:target.companyId,type:"EMAIL_SENT",description:`E-mail da campanha #${campaignId} enviado para ${target.recipient}`,createdAt:sentAt});sent++;
    }catch(error){const reason=error instanceof Error?error.message:"Falha desconhecida";await db.update(emailMessages).set({status:"FAILED",errorMessage:reason}).where(eq(emailMessages.id,message.id));await db.update(emailCampaignRecipients).set({status:"FAILED",processingStartedAt:null,errorMessage:reason,updatedAt:new Date()}).where(eq(emailCampaignRecipients.id,target.id));failed++;}
   }
-  const counters=await syncCampaignCounters(campaignId);const completed=counters.pending===0;const now=new Date(),nextRunAt=completed?null:new Date(now.getTime()+batch.campaign.intervalMinutes*60_000);await db.update(emailCampaigns).set({status:completed?"COMPLETED":"RUNNING",nextRunAt,lockUntil:null,completedAt:completed?now:null,updatedAt:now}).where(eq(emailCampaigns.id,campaignId));return {campaignId,processed:batch.recipients.length,sent,failed,skipped,retried,completed,paused:false,waitingDailyLimit:false,locked:false,nextRunAt,remainingToday:Math.max(0,batch.remaining-sent),counters};
+  const counters=await syncCampaignCounters(campaignId);const paused=await campaignWasPaused(campaignId);const completed=!paused&&counters.pending===0;const now=new Date(),nextRunAt=completed||paused?null:new Date(now.getTime()+batch.campaign.intervalMinutes*60_000);
+  if(paused){await db.update(emailCampaigns).set({nextRunAt:null,lockUntil:null,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.status,"PAUSED")));}
+  else{await db.update(emailCampaigns).set({status:completed?"COMPLETED":"RUNNING",nextRunAt,lockUntil:null,completedAt:completed?now:null,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.status,"RUNNING")));}
+  return {campaignId,processed:sent+failed+skipped+retried,sent,failed,skipped,retried,completed,paused,waitingDailyLimit:false,locked:false,nextRunAt,remainingToday:Math.max(0,batch.remaining-sent),counters};
  }catch(error){await syncCampaignCounters(campaignId);await db.update(emailCampaigns).set({lockUntil:null,updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));throw error;}
 }
 
