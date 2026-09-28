@@ -1,30 +1,53 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, MailCheck, RefreshCw, Send, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Building2, CheckCircle2, Filter, MailCheck, MapPin, RefreshCw, Send, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-
-import { CompanySearch } from "@/components/company-search";
 import { AttachmentList } from "@/components/email-attachments";
 import { type Attachment } from "@/lib/attachments";
 
-type Company={id:number;name:string;primaryEmail?:string|null;segment?:string|null;city?:string|null;state?:string|null};
 type Template={attachments:Attachment[];id:number;name:string;subject:string;body:string};
-type Result={companyId:number;company:string;recipient:string;status:"SENT"|"FAILED"|"SKIPPED";error?:string};
-type Summary={total:number;sent:number;failed:number;skipped:number;results:Result[]};
+type AudiencePreview={total:number;eligible:number;withoutEmail:number};
+
+type Filters={region:string;city:string;companySize:string;status:string};
+const INITIAL:Filters={region:"all",city:"all",companySize:"all",status:"all"};
+const STATUS=[
+ ["all","Todos"],["NOT_CONTACTED","Não contatadas"],["CONTACTED","Contatadas"],["WAITING_REPLY","Aguardando resposta"],["REPLIED","Responderam"],["FOLLOW_UP","Follow-up"],["INTERESTED","Interessadas"],["NOT_INTERESTED","Não interessadas"],["CLOSED","Fechadas"],
+] as const;
 
 export function BatchEmailsPage(){
- const[companies,setCompanies]=useState<Company[]>([]),[templates,setTemplates]=useState<Template[]>([]),[selected,setSelected]=useState<number[]>([]),[templateId,setTemplateId]=useState(""),[sending,setSending]=useState(false),[summary,setSummary]=useState<Summary|null>(null);
+ const[templates,setTemplates]=useState<Template[]>([]),[templateId,setTemplateId]=useState(""),[filters,setFilters]=useState<Filters>(INITIAL),[preview,setPreview]=useState<AudiencePreview|null>(null),[loadingAudience,setLoadingAudience]=useState(false),[cities,setCities]=useState<string[]>([]);
  useEffect(()=>{void fetch("/api/templates").then(async r=>{if(!r.ok)throw new Error();setTemplates(await r.json());}).catch(()=>toast.error("Não foi possível carregar os templates."));},[]);
-
- const template=templates.find(t=>String(t.id)===templateId),sample=companies.find(c=>selected.includes(c.id));
- function addCompany(company:Company){if(companies.some(c=>c.id===company.id))return;if(companies.length>=20)return void toast.error("O limite é de 20 empresas por lote.");setCompanies(current=>[...current,company]);setSelected(current=>[...current,company.id]);}
- const render=(value:string)=>value.replace(/{{\s*(empresa|contato|segmento|cidade|estado|email_empresa)\s*}}/g,(_,key:string)=>({empresa:sample?.name||"Empresa",contato:"Contato",segmento:sample?.segment||"",cidade:sample?.city||"",estado:sample?.state||"",email_empresa:sample?.primaryEmail||""})[key as "empresa"]||"");
- function toggle(id:number){setSelected(current=>current.includes(id)?current.filter(item=>item!==id):current.length<20?[...current,id]:(toast.error("O limite é de 20 empresas por lote."),current))}
- async function send(){setSending(true);setSummary(null);try{const response=await fetch("/api/email-batches",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({companyIds:selected,templateId:Number(templateId),confirmed:true})});const data=await response.json() as Summary&{error?:string};if(!response.ok)throw new Error(data.error||"Falha no envio em lote.");setSummary(data);toast.success(`${data.sent} e-mail(is) enviado(s) com sucesso.`);setSelected([]);setCompanies([])}catch(error){toast.error(error instanceof Error?error.message:"Não foi possível enviar o lote.")}finally{setSending(false)}}
- return <><section className="page-intro compact"><div><p className="eyebrow">CAMPANHA CONTROLADA</p><h1>Envio em lote</h1><p>Selecione até 20 empresas, revise a mensagem e confirme o disparo.</p></div></section><section className="batch-layout"><article className="panel batch-picker"><div className="batch-head"><div><Users/><span><strong>Destinatários</strong><small>{selected.length} de 20 selecionados</small></span></div><Button variant="outline" size="sm" disabled={sending} onClick={()=>{setSelected([]);setCompanies([]);}}>Limpar</Button></div><div className="batch-company-search"><CompanySearch value={null} onSelect={addCompany} disabled={sending}/></div><div className="batch-list">{companies.map(company=><label key={company.id} className=""><Checkbox checked={selected.includes(company.id)} disabled={sending} onCheckedChange={()=>toggle(company.id)}/><span><strong>{company.name}</strong><small>{company.primaryEmail||"Será utilizado o contato principal"}</small></span></label>)}</div></article><article className="panel batch-compose"><div className="batch-head"><div><MailCheck/><span><strong>Mensagem do lote</strong><small>As variáveis serão personalizadas para cada empresa</small></span></div></div><div className="batch-body"><div className="field"><label>Template obrigatório</label><Select value={templateId} onValueChange={setTemplateId}><SelectTrigger><SelectValue placeholder="Selecione um template"/></SelectTrigger><SelectContent>{templates.map(item=><SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>)}</SelectContent></Select></div>{template?<div className="batch-preview"><span>PRÉVIA PARA {sample?.name||"A PRIMEIRA EMPRESA"}</span><h3>{render(template.subject)}</h3><p>{render(template.body)}</p></div>:<div className="batch-empty"><MailCheck/><strong>Escolha um template</strong><span>A prévia personalizada aparecerá aqui.</span></div>}{template&&<AttachmentList files={template.attachments||[]}/>}<div className="batch-warning"><AlertTriangle/><span>Mensagens iguais para o mesmo destinatário nas últimas 24 horas serão ignoradas automaticamente.</span></div><AlertDialog><AlertDialogTrigger asChild><Button disabled={!selected.length||!templateId||sending}>{sending?<RefreshCw className="spin"/>:<Send/>}Revisar e enviar {selected.length||""}</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Confirmar envio em lote?</AlertDialogTitle><AlertDialogDescription>O Gmail enviará mensagens personalizadas para {selected.length} empresa(s). Falhas individuais não interromperão os outros envios.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Voltar e revisar</AlertDialogCancel><AlertDialogAction onClick={send}>Confirmar disparo</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog></div></article></section>{summary?<section className="panel batch-results"><div className="panel-heading"><div><h2>Resultado do último lote</h2><p>{summary.sent} enviados · {summary.skipped} ignorados · {summary.failed} falharam</p></div><CheckCircle2/></div><div>{summary.results.map(item=><article key={item.companyId}><span className={`batch-state ${item.status.toLowerCase()}`}>{item.status==="SENT"?"Enviado":item.status==="SKIPPED"?"Ignorado":"Falhou"}</span><strong>{item.company}</strong><small>{item.recipient||item.error}</small></article>)}</div></section>:null}</>;
+ useEffect(()=>{if(filters.region==="all"){setCities([]);return;}const p=new URLSearchParams({mode:"page",page:"1",pageSize:"10",region:filters.region});void fetch(`/api/companies?${p}`).then(async r=>{if(!r.ok)throw new Error();const d=await r.json() as {cities?:string[]};setCities(d.cities||[])}).catch(()=>setCities([]));},[filters.region]);
+ useEffect(()=>{const controller=new AbortController();const timer=setTimeout(async()=>{setLoadingAudience(true);try{const p=new URLSearchParams();if(filters.region!=="all")p.set("region",filters.region);if(filters.city!=="all")p.set("city",filters.city);if(filters.companySize!=="all")p.set("companySize",filters.companySize);if(filters.status!=="all")p.set("status",filters.status);const r=await fetch(`/api/email-campaigns/audience?${p}`,{signal:controller.signal});if(!r.ok)throw new Error();setPreview(await r.json())}catch(e){if((e as Error).name!=="AbortError")setPreview(null)}finally{if(!controller.signal.aborted)setLoadingAudience(false)}},300);return()=>{clearTimeout(timer);controller.abort()}},[filters]);
+ const template=templates.find(t=>String(t.id)===templateId);
+ const audienceLabel=useMemo(()=>{const parts:string[]=[];if(filters.region!=="all")parts.push(`Região ${filters.region}`);if(filters.city!=="all")parts.push(filters.city);if(filters.companySize!=="all")parts.push(filters.companySize);return parts.length?parts.join(" · "):"Toda a base"},[filters]);
+ function setFilter<K extends keyof Filters>(key:K,value:Filters[K]){setFilters(current=>({...current,[key]:value,...(key==="region"?{city:"all"}: {})}))}
+ return <>
+  <section className="page-intro compact"><div><p className="eyebrow">CAMPANHAS</p><h1>Envio em lote</h1><p>Defina o público, escolha a mensagem e revise antes de criar a campanha.</p></div></section>
+  <section className="batch-layout">
+   <article className="panel batch-picker">
+    <div className="batch-head"><div><Filter/><span><strong>Público-alvo</strong><small>Segmente sem carregar a base inteira no navegador</small></span></div><Button variant="outline" size="sm" onClick={()=>setFilters(INITIAL)}>Limpar filtros</Button></div>
+    <div className="batch-body">
+     <div className="field"><label>Região</label><Select value={filters.region} onValueChange={v=>setFilter("region",v)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todas as regiões</SelectItem>{Array.from({length:17},(_,i)=><SelectItem key={i+1} value={String(i+1)}>Região {i+1}</SelectItem>)}</SelectContent></Select></div>
+     <div className="field"><label>Cidade</label><Select value={filters.city} disabled={filters.region==="all"} onValueChange={v=>setFilter("city",v)}><SelectTrigger><SelectValue placeholder="Todas as cidades"/></SelectTrigger><SelectContent><SelectItem value="all">Todas as cidades</SelectItem>{cities.map(city=><SelectItem key={city} value={city}>{city}</SelectItem>)}</SelectContent></Select></div>
+     <div className="field"><label>Porte</label><Select value={filters.companySize} onValueChange={v=>setFilter("companySize",v)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">Todos os portes</SelectItem>{["MEI","MICRO","PEQUENA","MEDIA","GRANDE"].map(v=><SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div>
+     <div className="field"><label>Status</label><Select value={filters.status} onValueChange={v=>setFilter("status",v)}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{STATUS.map(([value,label])=><SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
+     <div className="batch-preview"><span>PÚBLICO SELECIONADO</span><h3>{audienceLabel}</h3>{loadingAudience?<p><RefreshCw className="spin"/> Calculando público...</p>:preview?<div className="campaign-audience-stats"><span><Building2/> <strong>{preview.total}</strong> encontradas</span><span><MailCheck/> <strong>{preview.eligible}</strong> prontas para envio</span><span><Users/> <strong>{preview.withoutEmail}</strong> sem destinatário</span></div>:<p>Não foi possível calcular o público.</p>}</div>
+     <div className="batch-warning"><MapPin/><span>Grupos de empresas serão adicionados futuramente como mais um filtro deste público, sem alterar a estrutura da campanha.</span></div>
+    </div>
+   </article>
+   <article className="panel batch-compose">
+    <div className="batch-head"><div><MailCheck/><span><strong>Mensagem</strong><small>O template será personalizado para cada destinatário</small></span></div></div>
+    <div className="batch-body">
+     <div className="field"><label>Template obrigatório</label><Select value={templateId} onValueChange={setTemplateId}><SelectTrigger><SelectValue placeholder="Selecione um template"/></SelectTrigger><SelectContent>{templates.map(item=><SelectItem key={item.id} value={String(item.id)}>{item.name}</SelectItem>)}</SelectContent></Select></div>
+     {template?<><div className="batch-preview"><span>PRÉVIA DO TEMPLATE</span><h3>{template.subject}</h3><p>{template.body}</p></div><AttachmentList files={template.attachments||[]}/></>:<div className="batch-empty"><MailCheck/><strong>Escolha um template</strong><span>A mensagem e os anexos aparecerão aqui.</span></div>}
+     <div className="batch-warning"><CheckCircle2/><span>A próxima etapa será a revisão final. Nenhum e-mail é enviado ao selecionar o público.</span></div>
+     <Button disabled={!templateId||!preview?.eligible}><Send/>Continuar para revisão {preview?.eligible?`(${preview.eligible})`:""}</Button>
+    </div>
+   </article>
+  </section>
+ </>;
 }
