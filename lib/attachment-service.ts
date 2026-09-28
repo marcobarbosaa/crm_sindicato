@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lte, asc } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, asc, notInArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { templateAttachments } from "@/db/schema";
 import { ATTACHMENT_LIMITS, AttachmentError, attachmentIds, validateAttachmentSet, type Attachment } from "./attachments";
@@ -15,11 +15,30 @@ export async function selectAttachments(tx: Transaction, owner: string, ids: str
   return ids.map(id => rows.find(row => row.id === id)!);
 }
 export async function syncTemplateAttachments(tx: Transaction, owner: string, templateId: number, ids: string[]) {
-  const rows = await selectAttachments(tx, owner, ids, templateId);
-  // Keep detached objects tracked until cleanup successfully deletes them.
-  await tx.update(templateAttachments).set({ templateId: null, expiresAt: new Date() }).where(and(eq(templateAttachments.ownerId, owner), eq(templateAttachments.templateId, templateId)));
-  if (ids.length) await tx.update(templateAttachments).set({ templateId }).where(and(eq(templateAttachments.ownerId, owner), inArray(templateAttachments.id, ids)));
-  return rows.map(attachmentMetadata);
+  await selectAttachments(tx, owner, ids, templateId);
+  const now = new Date();
+  const currentFilter = and(eq(templateAttachments.ownerId, owner), eq(templateAttachments.templateId, templateId));
+
+  // Desvincule somente arquivos realmente removidos. Os anexos mantidos não devem
+  // passar por um estado temporário expirado durante cada salvamento do template.
+  if (ids.length) {
+    await tx.update(templateAttachments)
+      .set({ templateId: null, expiresAt: now })
+      .where(and(currentFilter, notInArray(templateAttachments.id, ids)));
+    await tx.update(templateAttachments)
+      .set({ templateId, expiresAt: new Date(now.getTime() + ATTACHMENT_LIMITS.draftHours * 3600_000) })
+      .where(and(eq(templateAttachments.ownerId, owner), inArray(templateAttachments.id, ids)));
+  } else {
+    await tx.update(templateAttachments).set({ templateId: null, expiresAt: now }).where(currentFilter);
+  }
+
+  // Retorne o estado efetivamente persistido, e não o snapshot anterior ao UPDATE.
+  const persisted = ids.length
+    ? await tx.select().from(templateAttachments).where(and(eq(templateAttachments.ownerId, owner), eq(templateAttachments.templateId, templateId), inArray(templateAttachments.id, ids)))
+    : [];
+  if (persisted.length !== ids.length) throw new AttachmentError("Não foi possível vincular todos os anexos ao template.");
+  const byId = new Map(persisted.map(row => [row.id, row]));
+  return ids.map(id => attachmentMetadata(byId.get(id)!));
 }
 export async function loadSendAttachments(owner: string, value: unknown, templateId?: number) {
   return getDb().transaction(async tx => {
