@@ -5,7 +5,7 @@ import { activityLogs, companies, contacts } from "@/db/schema";
 
 type ContactInput = { id?: number; name?: string; email?: string; phone?: string; role?: string; isPrimary?: boolean };
 
-const ownerId = (request: NextRequest) => "local-preview-user";
+const ownerId = (_request: NextRequest) => "local-preview-user";
 
 async function ownedCompany(request: NextRequest, id: number) {
   const db = getDb();
