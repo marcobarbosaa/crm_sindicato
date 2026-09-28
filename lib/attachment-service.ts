@@ -6,11 +6,13 @@ import { attachmentStorage } from "./attachment-storage";
 export type AttachmentRow = typeof templateAttachments.$inferSelect;
 export type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 export const attachmentMetadata = ({ id, name, mimeType, size }: AttachmentRow): Attachment => ({ id, name, mimeType, size });
+const sameTemplateId = (rowTemplateId: number | string | null, templateId?: number) =>
+  rowTemplateId !== null && templateId !== undefined && Number(rowTemplateId) === Number(templateId);
 export async function selectAttachments(tx: Transaction, owner: string, ids: string[], templateId?: number) {
   attachmentIds(ids);
   if (!ids.length) return [];
   const rows = await tx.select().from(templateAttachments).where(and(eq(templateAttachments.ownerId, owner), inArray(templateAttachments.id, ids))).orderBy(asc(templateAttachments.id)).for("update");
-  if (rows.length !== ids.length || rows.some(row => !row.ready || (row.templateId !== null ? row.templateId !== templateId : row.expiresAt.getTime() <= Date.now()))) throw new AttachmentError("Um anexo não está disponível. Adicione o arquivo novamente.");
+  if (rows.length !== ids.length || rows.some(row => !row.ready || (row.templateId !== null ? !sameTemplateId(row.templateId, templateId) : row.expiresAt.getTime() <= Date.now()))) throw new AttachmentError("Um anexo não está disponível. Adicione o arquivo novamente.");
   validateAttachmentSet(rows);
   return ids.map(id => rows.find(row => row.id === id)!);
 }
