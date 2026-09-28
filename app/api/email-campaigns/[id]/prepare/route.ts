@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { getDb } from "@/db";
 import { companies, contacts, emailCampaignRecipients, emailCampaigns } from "@/db/schema";
+import { loadSendAttachments } from "@/lib/attachment-service";
 
 const ownerId = () => "local-preview-user";
 
@@ -24,6 +25,13 @@ export async function POST(...[, context]: [NextRequest, { params: Promise<{ id:
   const [campaign] = await db.select().from(emailCampaigns).where(and(eq(emailCampaigns.id, campaignId), eq(emailCampaigns.ownerId, owner))).limit(1);
   if (!campaign) return NextResponse.json({ error: "Campanha não encontrada." }, { status: 404 });
   if (!['DRAFT', 'READY'].includes(campaign.status)) return NextResponse.json({ error: "O público não pode ser alterado depois que a campanha iniciou." }, { status: 409 });
+  if (!campaign.templateId) return NextResponse.json({ error: "O template da campanha não está mais disponível." }, { status: 409 });
+
+  try {
+    await loadSendAttachments(owner, undefined, campaign.templateId);
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? `Não foi possível validar os anexos do template: ${error.message}` : "Não foi possível validar os anexos do template." }, { status: 409 });
+  }
 
   const audience = (campaign.audience || {}) as Audience;
   const condition = and(
