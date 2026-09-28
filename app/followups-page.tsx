@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CalendarClock, Check, CheckCircle2, Clock3, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,8 @@ type FollowUp={id:number;companyId:number;companyName:string;dueAt:string;status
 
 export function FollowUpsPage(){
  const[items,setItems]=useState<FollowUp[]>([]),[companies,setCompanies]=useState<Company[]>([]),[open,setOpen]=useState(false),[saving,setSaving]=useState(false),[companyId,setCompanyId]=useState(""),[dueAt,setDueAt]=useState(""),[note,setNote]=useState("");
- const load=useCallback(async()=>{try{const[f,c]=await Promise.all([fetch("/api/followups"),fetch("/api/companies")]);if(!f.ok||!c.ok)throw new Error();setItems(await f.json());setCompanies(await c.json())}catch{toast.error("Não foi possível carregar os follow-ups.")}},[]); useEffect(()=>{void load()},[load]);
+ const load=useCallback(async(signal?:AbortSignal)=>{try{const[f,c]=await Promise.all([fetch("/api/followups",{signal}),fetch("/api/companies",{signal})]);if(!f.ok||!c.ok)throw new Error();const[nextItems,nextCompanies]=await Promise.all([f.json() as Promise<FollowUp[]>,c.json() as Promise<Company[]>]);if(signal?.aborted)return;setItems(nextItems);setCompanies(nextCompanies)}catch(error){if((error as Error).name!=="AbortError")toast.error("Não foi possível carregar os follow-ups.")}},[]);
+ useEffect(()=>{const controller=new AbortController();const timer=setTimeout(()=>{void load(controller.signal)},0);return()=>{clearTimeout(timer);controller.abort()}},[load]);
  const now=new Date(),todayStart=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime(),tomorrow=todayStart+86400000;
  const pending=items.filter(i=>i.status==="PENDING"),overdue=pending.filter(i=>new Date(i.dueAt).getTime()<todayStart),today=pending.filter(i=>{const d=new Date(i.dueAt).getTime();return d>=todayStart&&d<tomorrow}),upcoming=pending.filter(i=>new Date(i.dueAt).getTime()>=tomorrow),completed=items.filter(i=>i.status==="COMPLETED").slice(-10).reverse();
  async function create(e:React.FormEvent){e.preventDefault();setSaving(true);try{const r=await fetch("/api/followups",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({companyId:Number(companyId),dueAt,note})});const data=await r.json() as {error?:string};if(!r.ok)throw new Error(data.error||"Falha ao agendar.");toast.success("Follow-up agendado.");setOpen(false);setCompanyId("");setDueAt("");setNote("");await load()}catch(error){toast.error(error instanceof Error?error.message:"Não foi possível agendar.")}finally{setSaving(false)}}
