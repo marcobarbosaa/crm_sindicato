@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { emailCampaignRecipients, emailCampaigns } from "@/db/schema";
 
@@ -27,10 +27,12 @@ export async function POST(request:NextRequest,context:{params:Promise<{id:strin
  }
  if(body.action==="resume"){
   if(campaign.status!=="PAUSED")return NextResponse.json({error:"Somente campanhas pausadas podem ser retomadas."},{status:409});
-  const [{uncertain}]=await db.select({uncertain:sql<number>`count(*)`}).from(emailCampaignRecipients).where(and(eq(emailCampaignRecipients.campaignId,campaignId),eq(emailCampaignRecipients.status,"UNCERTAIN")));
-  if(Number(uncertain||0)>0)return NextResponse.json({error:"Revise todos os envios com resultado incerto antes de retomar a campanha."},{status:409});
+  const [{unresolved}]=await db.select({unresolved:sql<number>`count(*)`}).from(emailCampaignRecipients).where(and(eq(emailCampaignRecipients.campaignId,campaignId),or(eq(emailCampaignRecipients.status,"UNCERTAIN"),eq(emailCampaignRecipients.status,"PROCESSING"))));
+  if(Number(unresolved||0)>0)return NextResponse.json({error:"Aguarde o processamento atual terminar ou revise todos os envios com resultado incerto antes de retomar a campanha."},{status:409});
   const lockActive=campaign.lockUntil&&campaign.lockUntil.getTime()>now.getTime();
-  const [updated]=await db.update(emailCampaigns).set({status:"RUNNING",nextRunAt:lockActive?campaign.lockUntil:now,lockUntil:lockActive?campaign.lockUntil:null,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner),eq(emailCampaigns.status,"PAUSED"))).returning();
+  // Sem destinatários PROCESSING/UNCERTAIN, um lock antigo pode ser descartado com segurança.
+  // Isso evita uma campanha ficar parada até a expiração de um lock órfão após interrupção do Worker.
+  const [updated]=await db.update(emailCampaigns).set({status:"RUNNING",nextRunAt:now,lockUntil:lockActive?null:campaign.lockUntil,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner),eq(emailCampaigns.status,"PAUSED"))).returning();
   return NextResponse.json(updated);
  }
  return NextResponse.json({error:"Ação inválida."},{status:400});
