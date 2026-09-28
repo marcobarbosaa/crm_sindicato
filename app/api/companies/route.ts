@@ -11,7 +11,7 @@ import {
 import { normalizeBrazilianPhone, normalizeWhatsAppStatus } from "@/lib/phone";
 import { isValidRegion, parseRegion } from "@/lib/region";
 
-const ownerId = (_request: NextRequest) => "local-preview-user";
+const ownerId = () => "local-preview-user";
 
 function presenceFilter(column: typeof companies.primaryEmail | typeof companies.phone | typeof companies.mobile, value: string | null) {
   if (value === "with") return and(isNotNull(column), ne(column, ""));
@@ -21,7 +21,7 @@ function presenceFilter(column: typeof companies.primaryEmail | typeof companies
 
 export async function GET(request: NextRequest) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const params = request.nextUrl.searchParams;
   const search = params.get("search")?.trim();
   const limitParam = params.get("limit");
@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const body = (await request.json()) as Record<string, string | undefined>;
   if (!body.name?.trim())
     return NextResponse.json(
@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const id = Number(request.nextUrl.searchParams.get("id"));
   if (!Number.isInteger(id))
     return NextResponse.json({ error: "Empresa inválida." }, { status: 400 });

@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { companies, contacts, emailCampaignRecipients, emailCampaigns } from "@/db/schema";
 
-const ownerId = (_request: NextRequest) => "local-preview-user";
+const ownerId = () => "local-preview-user";
 
 type Audience = {
   region?: number;
@@ -14,9 +14,9 @@ type Audience = {
   groupIds?: number[];
 };
 
-export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function POST(...[, context]: [NextRequest, { params: Promise<{ id: string }> }]) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const { id: rawId } = await context.params;
   const campaignId = Number(rawId);
   if (!Number.isInteger(campaignId)) return NextResponse.json({ error: "Campanha inválida." }, { status: 400 });

@@ -35,14 +35,14 @@ type ImportBody = {
   preview?: boolean;
   rows?: ImportRow[];
 };
-const ownerId = (request: NextRequest) =>
+const ownerId = () =>
   "local-preview-user";
 const clean = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   return NextResponse.json(
     await db
       .select()
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const body = (await request.json()) as ImportBody;
   const rows = Array.isArray(body.rows) ? body.rows.slice(0, 4000) : [];
   if (!rows.length)

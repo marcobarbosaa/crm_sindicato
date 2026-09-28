@@ -9,10 +9,10 @@ import { AttachmentError } from "@/lib/attachments";
 
 type SendInput={companyId?:number;contactId?:number;templateId?:number;recipient?:string;subject?:string;body?:string;confirmRepeat?:boolean;attachmentIds?:string[]};
 const GMAIL_SEND_SCOPE="https://www.googleapis.com/auth/gmail.send";
-const ownerId=(request:NextRequest)=>"local-preview-user";
+const ownerId=()=>"local-preview-user";
 
-export async function GET(request:NextRequest){
- const db=getDb(),owner=ownerId(request);
+export async function GET(){
+ const db=getDb(),owner=ownerId();
  const rows=await db
   .select({message:emailMessages,companyName:companies.name})
   .from(emailMessages)
@@ -24,7 +24,7 @@ export async function GET(request:NextRequest){
 }
 
 export async function POST(request:NextRequest){
- const db=getDb(),owner=ownerId(request),input=await request.json() as SendInput; const recipient=input.recipient?.trim().toLowerCase()||"",subject=input.subject?.trim()||"";let body=input.body?.trim()||"";
+ const db=getDb(),owner=ownerId(),input=await request.json() as SendInput; const recipient=input.recipient?.trim().toLowerCase()||"",subject=input.subject?.trim()||"";let body=input.body?.trim()||"";
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient))return NextResponse.json({error:"Informe um e-mail de destinatário válido."},{status:400});
  if(!subject)return NextResponse.json({error:"Informe o assunto do e-mail."},{status:400}); if(!body)return NextResponse.json({error:"Escreva o conteúdo do e-mail."},{status:400});
  if(subject.length>200||body.length>20000)return NextResponse.json({error:"O assunto ou a mensagem ultrapassou o limite permitido."},{status:400});

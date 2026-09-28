@@ -4,7 +4,7 @@ import { and, count, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { companies, contacts } from "@/db/schema";
 
-const ownerId = (_request: NextRequest) => "local-preview-user";
+const ownerId = () => "local-preview-user";
 
 function validRegion(value: number) {
   return Number.isInteger(value) && value >= 1 && value <= 17;
@@ -12,7 +12,7 @@ function validRegion(value: number) {
 
 export async function GET(request: NextRequest) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const params = request.nextUrl.searchParams;
 
   const region = Number(params.get("region"));

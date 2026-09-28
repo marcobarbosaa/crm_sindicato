@@ -5,13 +5,13 @@ import { getDb } from "@/db";
 import { emailCampaignRecipients, emailCampaigns } from "@/db/schema";
 import { syncCampaignCounters } from "@/lib/campaign-counters";
 
-const ownerId = (_request: NextRequest) => "local-preview-user";
+const ownerId = () => "local-preview-user";
 
 type ReviewAction = "mark-sent" | "retry" | "mark-failed";
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const { id } = await context.params;
   const campaignId = Number(id);
   const body = (await request.json()) as { recipientId?: number; action?: ReviewAction };

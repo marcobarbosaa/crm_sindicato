@@ -4,11 +4,11 @@ import { and, asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { emailCampaignRecipients, emailCampaigns } from "@/db/schema";
 
-const ownerId = (_request: NextRequest) => "local-preview-user";
+const ownerId = () => "local-preview-user";
 
-export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function GET(...[, context]: [NextRequest, { params: Promise<{ id: string }> }]) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const { id } = await context.params;
   const campaignId = Number(id);
 

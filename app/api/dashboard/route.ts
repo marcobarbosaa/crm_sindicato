@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activityLogs, companies, emailMessages, followUps } from "@/db/schema";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const db = getDb(); const owner = "local-preview-user";
   const startToday = new Date(); startToday.setHours(3, 0, 0, 0); const endToday=new Date(startToday.getTime()+86400000-1); const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
   const [companyCounts, todayEmails, weekEmails, dueFollowUps, activities] = await Promise.all([

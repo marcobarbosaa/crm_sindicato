@@ -3,11 +3,11 @@ import { and, eq, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { emailCampaignRecipients, emailCampaigns } from "@/db/schema";
 
-const ownerId=(_request:NextRequest)=>"local-preview-user";
+const ownerId=()=>"local-preview-user";
 type Action="start"|"pause"|"resume";
 
 export async function POST(request:NextRequest,context:{params:Promise<{id:string}>}){
- const db=getDb(),owner=ownerId(request),{id:rawId}=await context.params,campaignId=Number(rawId);
+ const db=getDb(),owner=ownerId(),{id:rawId}=await context.params,campaignId=Number(rawId);
  if(!Number.isInteger(campaignId))return NextResponse.json({error:"Campanha inválida."},{status:400});
  const body=await request.json().catch(()=>({})) as {action?:Action};
  const [campaign]=await db.select().from(emailCampaigns).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner))).limit(1);

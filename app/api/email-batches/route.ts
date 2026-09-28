@@ -9,11 +9,11 @@ import { AttachmentError } from "@/lib/attachments";
 
 const SEND_SCOPE="https://www.googleapis.com/auth/gmail.send";
 const LIMIT=20;
-const ownerId=(request:NextRequest)=>"local-preview-user";
+const ownerId=()=>"local-preview-user";
 const personalize=(value:string,data:Record<string,string>)=>value.replace(/{{\s*(empresa|contato|segmento|cidade|estado|email_empresa)\s*}}/g,(_,key:string)=>data[key]||"");
 
 export async function POST(request:NextRequest){
- const db=getDb(),owner=ownerId(request),input=await request.json() as {companyIds?:number[];templateId?:number;confirmed?:boolean};
+ const db=getDb(),owner=ownerId(),input=await request.json() as {companyIds?:number[];templateId?:number;confirmed?:boolean};
  const ids=[...new Set((input.companyIds||[]).map(Number).filter(Number.isInteger))];
  if(!input.confirmed)return NextResponse.json({error:"Confirme explicitamente o envio em lote."},{status:400});
  if(!ids.length)return NextResponse.json({error:"Selecione pelo menos uma empresa."},{status:400});

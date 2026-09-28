@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { CheckCircle2, Gauge, Mail, Save, Settings, ShieldCheck, Signature, Unplug, UserRound } from "lucide-react";
+import { CheckCircle2, Gauge, Mail, Save, ShieldCheck, Signature, Unplug, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

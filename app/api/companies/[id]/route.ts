@@ -11,15 +11,14 @@ import {
 import { normalizeBrazilianPhone, normalizeWhatsAppStatus } from "@/lib/phone";
 import { isValidRegion, parseRegion } from "@/lib/region";
 
-const ownerId = (request: NextRequest) =>
+const ownerId = () =>
   "local-preview-user";
 
 export async function GET(
-  request: NextRequest,
-  context: { params: Promise<{ id: string }> },
+  ...[, context]: [NextRequest, { params: Promise<{ id: string }> }]
 ) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const id = Number((await context.params).id);
   if (!Number.isInteger(id))
     return NextResponse.json({ error: "Empresa inválida." }, { status: 400 });
@@ -56,7 +55,7 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> },
 ) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const id = Number((await context.params).id);
   const body = (await request.json()) as Record<string, string | undefined>;
   if (!Number.isInteger(id))

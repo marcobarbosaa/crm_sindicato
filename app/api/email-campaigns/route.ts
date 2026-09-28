@@ -4,7 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { emailCampaigns, emailTemplates } from "@/db/schema";
 
-const ownerId = (_request: NextRequest) => "local-preview-user";
+const ownerId = () => "local-preview-user";
 
 type Audience = {
   region?: number;
@@ -22,9 +22,9 @@ type CreateCampaignInput = {
   intervalMinutes?: number;
 };
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const rows = await db
     .select()
     .from(emailCampaigns)
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const db = getDb();
-  const owner = ownerId(request);
+  const owner = ownerId();
   const input = (await request.json()) as CreateCampaignInput;
   const name = input.name?.trim();
   const templateId = Number(input.templateId);
