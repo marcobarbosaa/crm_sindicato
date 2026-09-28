@@ -6,6 +6,7 @@ import { decryptToken, encodeRawEmail, refreshAccessToken } from "@/lib/gmail";
 
 const SEND_SCOPE="https://www.googleapis.com/auth/gmail.send";
 const LOCK_MS=5*60_000;
+const STALE_PROCESSING_MS=10*60_000;
 const personalize=(value:string,data:Record<string,string>)=>value.replace(/{{\s*(empresa|contato|segmento|cidade|estado|email_empresa)\s*}}/g,(_,key:string)=>data[key]||"");
 
 function getSaoPauloDayWindow(now=new Date()){
@@ -14,6 +15,26 @@ function getSaoPauloDayWindow(now=new Date()){
  const start=new Date(`${value("year")}-${value("month")}-${value("day")}T00:00:00-03:00`);
  const next=new Date(start.getTime()+24*60*60_000);
  return {start,next};
+}
+
+export async function reconcileStaleRecipients(campaignId?:number){
+ const db=getDb(),cutoff=new Date(Date.now()-STALE_PROCESSING_MS);
+ const stale=await db.select().from(emailCampaignRecipients).where(and(eq(emailCampaignRecipients.status,"PROCESSING"),lte(emailCampaignRecipients.processingStartedAt,cutoff),campaignId?eq(emailCampaignRecipients.campaignId,campaignId):undefined)).orderBy(asc(emailCampaignRecipients.id)).limit(100);
+ let recovered=0,confirmedSent=0,quarantined=0;
+ for(const target of stale){
+  const [message]=target.messageId?await db.select().from(emailMessages).where(eq(emailMessages.id,target.messageId)).limit(1):[];
+  if(message?.status==="SENT"&&message.providerMessageId){
+   await db.update(emailCampaignRecipients).set({status:"SENT",providerMessageId:message.providerMessageId,sentAt:message.sentAt||new Date(),processingStartedAt:null,errorMessage:null,updatedAt:new Date()}).where(eq(emailCampaignRecipients.id,target.id));confirmedSent++;continue;
+  }
+  if(message?.status==="FAILED"){
+   await db.update(emailCampaignRecipients).set({status:"FAILED",processingStartedAt:null,errorMessage:message.errorMessage||"Falha registrada durante o envio.",updatedAt:new Date()}).where(eq(emailCampaignRecipients.id,target.id));continue;
+  }
+  if(!message){
+   await db.update(emailCampaignRecipients).set({status:"PENDING",processingStartedAt:null,messageId:null,errorMessage:"Processamento interrompido antes da criação da mensagem; reenfileirado.",updatedAt:new Date()}).where(eq(emailCampaignRecipients.id,target.id));recovered++;continue;
+  }
+  await db.update(emailCampaignRecipients).set({status:"UNCERTAIN",processingStartedAt:null,errorMessage:"Envio interrompido após criação da mensagem; resultado no Gmail é incerto e exige revisão para evitar duplicidade.",updatedAt:new Date()}).where(eq(emailCampaignRecipients.id,target.id));quarantined++;
+ }
+ return {checked:stale.length,recovered,confirmedSent,quarantined};
 }
 
 export async function claimCampaign(ownerId:string,campaignId:number){
@@ -40,9 +61,10 @@ export async function processCampaignBatch(ownerId:string,campaignId:number){
  const db=getDb();const claimed=await claimCampaign(ownerId,campaignId);
  if(!claimed)return {campaignId,processed:0,completed:false,paused:false,locked:true};
  try{
+  await reconcileStaleRecipients(campaignId);
   const batch=await getCampaignBatch(ownerId,campaignId);
   if(batch.remaining<=0){const nextRunAt=new Date(batch.nextDailyWindow.getTime()+60_000);await db.update(emailCampaigns).set({status:"RUNNING",nextRunAt,lockUntil:null,updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));return {campaignId,processed:0,completed:false,paused:false,waitingDailyLimit:true,locked:false,nextRunAt,remainingToday:0};}
-  if(!batch.recipients.length){await db.update(emailCampaigns).set({status:"COMPLETED",pending:0,lockUntil:null,nextRunAt:null,completedAt:new Date(),updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));return {campaignId,processed:0,completed:true,paused:false,locked:false,remainingToday:batch.remaining};}
+  if(!batch.recipients.length){const [{unresolved}]=await db.select({unresolved:sql<number>`count(*)`}).from(emailCampaignRecipients).where(and(eq(emailCampaignRecipients.campaignId,campaignId),or(eq(emailCampaignRecipients.status,"PROCESSING"),eq(emailCampaignRecipients.status,"UNCERTAIN"))));if(Number(unresolved||0)>0){await db.update(emailCampaigns).set({status:"PAUSED",lockUntil:null,nextRunAt:null,updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));return {campaignId,processed:0,completed:false,paused:true,needsReview:true,unresolved:Number(unresolved||0),locked:false};}await db.update(emailCampaigns).set({status:"COMPLETED",pending:0,lockUntil:null,nextRunAt:null,completedAt:new Date(),updatedAt:new Date()}).where(eq(emailCampaigns.id,campaignId));return {campaignId,processed:0,completed:true,paused:false,locked:false,remainingToday:batch.remaining};}
   const [account]=await db.select().from(emailAccounts).where(and(eq(emailAccounts.ownerId,ownerId),eq(emailAccounts.provider,"GMAIL"))).limit(1);
   if(!account||!account.scopes.split(/\s+/).includes(SEND_SCOPE))throw new Error("Conecte o Gmail com permissão de envio antes de continuar.");
   const [template]=await db.select().from(emailTemplates).where(and(eq(emailTemplates.id,Number(batch.campaign.templateId)),eq(emailTemplates.ownerId,ownerId))).limit(1);
@@ -54,10 +76,13 @@ export async function processCampaignBatch(ownerId:string,campaignId:number){
   for(const target of batch.recipients){
    const data=target.personalization||{};const subject=personalize(template.subject,data),messageBody=personalize(template.body,data),body=batch.settings?.signature?`${messageBody}\n\n${batch.settings.signature}`:messageBody;
    const [duplicate]=await db.select({id:emailMessages.id}).from(emailMessages).where(and(eq(emailMessages.ownerId,ownerId),eq(emailMessages.recipient,target.recipient),eq(emailMessages.subject,subject),gte(emailMessages.createdAt,sql`${Date.now()-24*60*60_000}`))).limit(1);
-   if(duplicate){await db.update(emailCampaignRecipients).set({status:"SKIPPED",errorMessage:"E-mail igual enviado nas últimas 24 horas.",updatedAt:new Date()}).where(eq(emailCampaignRecipients.id,target.id));skipped++;continue;}
-   const now=new Date();const [message]=await db.insert(emailMessages).values({ownerId,companyId:target.companyId,contactId:target.contactId,templateId:template.id,campaignId,recipient:target.recipient,subject,body,attachments:metadata,status:"QUEUED",kind:"BATCH",createdAt:now}).returning();
-   await db.update(emailCampaignRecipients).set({status:"PROCESSING",attempts:target.attempts+1,updatedAt:now}).where(and(eq(emailCampaignRecipients.id,target.id),eq(emailCampaignRecipients.status,"PENDING")));
-   try{const response=await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send",{method:"POST",headers:{authorization:`Bearer ${accessToken}`,"content-type":"application/json"},body:JSON.stringify({raw:encodeRawEmail({from,to:target.recipient,subject,body,attachments})})});const result=await response.json() as {id?:string;error?:{message?:string}};if(!response.ok||!result.id)throw new Error(result.error?.message||"O Gmail recusou o envio.");const sentAt=new Date();await db.update(emailMessages).set({status:"SENT",providerMessageId:result.id,sentAt}).where(eq(emailMessages.id,message.id));await db.update(emailCampaignRecipients).set({status:"SENT",providerMessageId:result.id,sentAt,updatedAt:sentAt}).where(eq(emailCampaignRecipients.id,target.id));if(target.companyId)await db.insert(activityLogs).values({ownerId,companyId:target.companyId,type:"EMAIL_SENT",description:`E-mail da campanha #${campaignId} enviado para ${target.recipient}`,createdAt:sentAt});sent++;}catch(error){const reason=error instanceof Error?error.message:"Falha desconhecida";await db.update(emailMessages).set({status:"FAILED",errorMessage:reason}).where(eq(emailMessages.id,message.id));await db.update(emailCampaignRecipients).set({status:"FAILED",errorMessage:reason,updatedAt:new Date()}).where(eq(emailCampaignRecipients.id,target.id));failed++;}
+   if(duplicate){await db.update(emailCampaignRecipients).set({status:"SKIPPED",processingStartedAt:null,errorMessage:"E-mail igual enviado nas últimas 24 horas.",updatedAt:new Date()}).where(eq(emailCampaignRecipients.id,target.id));skipped++;continue;}
+   const now=new Date();
+   const [claimedTarget]=await db.update(emailCampaignRecipients).set({status:"PROCESSING",attempts:target.attempts+1,processingStartedAt:now,errorMessage:null,updatedAt:now}).where(and(eq(emailCampaignRecipients.id,target.id),eq(emailCampaignRecipients.status,"PENDING"))).returning();
+   if(!claimedTarget)continue;
+   const [message]=await db.insert(emailMessages).values({ownerId,companyId:target.companyId,contactId:target.contactId,templateId:template.id,campaignId,recipient:target.recipient,subject,body,attachments:metadata,status:"QUEUED",kind:"BATCH",createdAt:now}).returning();
+   await db.update(emailCampaignRecipients).set({messageId:message.id,updatedAt:new Date()}).where(and(eq(emailCampaignRecipients.id,target.id),eq(emailCampaignRecipients.status,"PROCESSING")));
+   try{const response=await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send",{method:"POST",headers:{authorization:`Bearer ${accessToken}`,"content-type":"application/json"},body:JSON.stringify({raw:encodeRawEmail({from,to:target.recipient,subject,body,attachments})})});const result=await response.json() as {id?:string;error?:{message?:string}};if(!response.ok||!result.id)throw new Error(result.error?.message||"O Gmail recusou o envio.");const sentAt=new Date();await db.update(emailMessages).set({status:"SENT",providerMessageId:result.id,sentAt}).where(eq(emailMessages.id,message.id));await db.update(emailCampaignRecipients).set({status:"SENT",providerMessageId:result.id,sentAt,processingStartedAt:null,errorMessage:null,updatedAt:sentAt}).where(eq(emailCampaignRecipients.id,target.id));if(target.companyId)await db.insert(activityLogs).values({ownerId,companyId:target.companyId,type:"EMAIL_SENT",description:`E-mail da campanha #${campaignId} enviado para ${target.recipient}`,createdAt:sentAt});sent++;}catch(error){const reason=error instanceof Error?error.message:"Falha desconhecida";await db.update(emailMessages).set({status:"FAILED",errorMessage:reason}).where(eq(emailMessages.id,message.id));await db.update(emailCampaignRecipients).set({status:"FAILED",processingStartedAt:null,errorMessage:reason,updatedAt:new Date()}).where(eq(emailCampaignRecipients.id,target.id));failed++;}
   }
   const [{pending}]=await db.select({pending:sql<number>`count(*)`}).from(emailCampaignRecipients).where(and(eq(emailCampaignRecipients.campaignId,campaignId),eq(emailCampaignRecipients.status,"PENDING")));const completed=Number(pending||0)===0;const now=new Date();const nextRunAt=completed?null:new Date(now.getTime()+batch.campaign.intervalMinutes*60_000);await db.update(emailCampaigns).set({status:completed?"COMPLETED":"RUNNING",pending:Number(pending||0),sent:batch.campaign.sent+sent,failed:batch.campaign.failed+failed,skipped:batch.campaign.skipped+skipped,nextRunAt,lockUntil:null,completedAt:completed?now:null,updatedAt:now}).where(eq(emailCampaigns.id,campaignId));
   return {campaignId,processed:batch.recipients.length,sent,failed,skipped,completed,paused:false,waitingDailyLimit:false,locked:false,nextRunAt,remainingToday:Math.max(0,batch.remaining-sent)};
