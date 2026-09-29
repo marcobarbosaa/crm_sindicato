@@ -4,7 +4,7 @@ import { getDb } from "@/db";
 import { emailCampaignRecipients, emailCampaigns } from "@/db/schema";
 
 const ownerId=()=>"local-preview-user";
-type Action="start"|"pause"|"resume";
+type Action="start"|"pause"|"resume"|"cancel";
 
 export async function POST(request:NextRequest,context:{params:Promise<{id:string}>}){
  const db=getDb(),owner=ownerId(),{id:rawId}=await context.params,campaignId=Number(rawId);
@@ -33,6 +33,12 @@ export async function POST(request:NextRequest,context:{params:Promise<{id:strin
   // Sem destinatários PROCESSING/UNCERTAIN, um lock antigo pode ser descartado com segurança.
   // Isso evita uma campanha ficar parada até a expiração de um lock órfão após interrupção do Worker.
   const [updated]=await db.update(emailCampaigns).set({status:"RUNNING",nextRunAt:now,lockUntil:lockActive?null:campaign.lockUntil,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner),eq(emailCampaigns.status,"PAUSED"))).returning();
+  return NextResponse.json(updated);
+ }
+ if(body.action==="cancel"){
+  if(!["READY","RUNNING","PAUSED"].includes(campaign.status))return NextResponse.json({error:"Esta campanha não pode mais ser cancelada."},{status:409});
+  const [updated]=await db.update(emailCampaigns).set({status:"CANCELLED",nextRunAt:null,lockUntil:null,completedAt:now,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner),eq(emailCampaigns.status,campaign.status))).returning();
+  if(!updated)return NextResponse.json({error:"O estado da campanha mudou. Atualize a tela e tente novamente."},{status:409});
   return NextResponse.json(updated);
  }
  return NextResponse.json({error:"Ação inválida."},{status:400});
