@@ -1,13 +1,88 @@
 "use client";
-import { useEffect, useState } from "react";
-import { CheckCircle2, Gauge, Mail, Save, ShieldCheck, Signature, Unplug, UserRound } from "lucide-react";
+
+import { useEffect, useRef, useState } from "react";
+import { CalendarDays, RefreshCw, Save, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { GeneralSettings, EmailSettings, SendingSettings, SendingUsage } from "./settings/config-sections";
+import { GmailSettings } from "./settings/gmail-settings";
+import { DataSettings, FollowUpSettings, FollowUpSummary, SecuritySettings } from "./settings/data-sections";
+import { SettingsNavigation, readSettingsTab, settingsTabs } from "./settings/navigation";
+import { LoadingSettings, SettingsError } from "./settings/shared";
+import { requestJson, useSettingsResource } from "./settings/use-settings-resource";
+import type { CrmConfig, GmailStatus, SettingsDestination, SettingsSummary, SettingsTab } from "./settings/types";
 
-type Config={senderName:string;signature:string;dailySendLimit:number;timezone:string};type Gmail={configured:boolean;connected:boolean;account:{email:string;connectedAt:string}|null};
-export function SettingsPage(){const[config,setConfig]=useState<Config>({senderName:"",signature:"",dailySendLimit:100,timezone:"America/Sao_Paulo"}),[gmail,setGmail]=useState<Gmail|null>(null),[saving,setSaving]=useState(false);useEffect(()=>{void Promise.all([fetch("/api/settings"),fetch("/api/gmail/status")]).then(async([s,g])=>{setConfig(await s.json());setGmail(await g.json())}).catch(()=>toast.error("Não foi possível carregar as configurações."))},[]);async function save(){setSaving(true);try{const r=await fetch("/api/settings",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(config)});const data=await r.json() as Config&{error?:string};if(!r.ok)throw new Error(data.error||"Falha ao salvar.");setConfig(data);toast.success("Configurações salvas.")}catch(e){toast.error(e instanceof Error?e.message:"Não foi possível salvar.")}finally{setSaving(false)}}async function disconnect(){if(!confirm("Desconectar esta conta Gmail?"))return;const r=await fetch("/api/gmail/status",{method:"DELETE"});if(r.ok){setGmail(v=>v?{...v,connected:false,account:null}:v);toast.success("Gmail desconectado.")}}
-return <><section className="page-intro compact"><div><p className="eyebrow">PREFERÊNCIAS DO CRM</p><h1>Configurações</h1><p>Defina sua identidade de envio e os limites de segurança.</p></div><Button onClick={save} disabled={saving}><Save/>{saving?"Salvando…":"Salvar alterações"}</Button></section><section className="settings-layout"><div className="settings-main"><article className="panel settings-card"><header><UserRound/><div><h2>Perfil do remetente</h2><p>Informações usadas como referência nos envios.</p></div></header><div className="settings-body"><div className="field"><Label htmlFor="sender-name">Nome do remetente</Label><Input id="sender-name" value={config.senderName} onChange={e=>setConfig(v=>({...v,senderName:e.target.value}))} placeholder="Ex.: Marco Barbosa" maxLength={100}/></div><div className="field"><Label>Fuso horário</Label><Select value={config.timezone} onValueChange={timezone=>setConfig(v=>({...v,timezone}))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="America/Sao_Paulo">Brasília (GMT-3)</SelectItem><SelectItem value="UTC">UTC</SelectItem></SelectContent></Select></div></div></article><article className="panel settings-card"><header><Signature/><div><h2>Assinatura de e-mail</h2><p>Adicionada automaticamente ao final de cada mensagem.</p></div></header><div className="settings-body"><div className="field"><Label htmlFor="signature">Assinatura</Label><Textarea id="signature" value={config.signature} onChange={e=>setConfig(v=>({...v,signature:e.target.value}))} placeholder={"Atenciosamente,\nMarco Barbosa\nSindicato..."} maxLength={2000}/><small>{config.signature.length}/2000 caracteres</small></div><div className="signature-preview"><span>PRÉVIA</span><p>Olá, esta é uma mensagem de exemplo.</p>{config.signature?<><hr/><p>{config.signature}</p></>:null}</div></div></article><article className="panel settings-card"><header><Gauge/><div><h2>Limites de envio</h2><p>Proteção diária aplicada a envios individuais e em lote.</p></div></header><div className="settings-body limit-setting"><div className="field"><Label htmlFor="daily-limit">Máximo de e-mails por dia</Label><Input id="daily-limit" type="number" min={1} max={500} value={config.dailySendLimit} onChange={e=>setConfig(v=>({...v,dailySendLimit:Number(e.target.value)}))}/><small>Entre 1 e 500. O Gmail também aplica os próprios limites.</small></div><div className="safety-note"><ShieldCheck/><span>Envios em lote continuam limitados a 20 destinatários e exigem confirmação.</span></div></div></article></div><aside className="panel settings-gmail"><div className="gmail-logo">G</div><h2>Conta de envio</h2>{gmail?.connected?<><span className="settings-connected"><CheckCircle2/>Conectada</span><strong>{gmail.account?.email}</strong><p>Esta conta é usada em todos os envios do CRM.</p><Button variant="outline" onClick={disconnect}><Unplug/>Desconectar Gmail</Button></>:<><span className="settings-disconnected">Não conectada</span><p>Conecte uma conta Google com permissão para enviar mensagens.</p><Button asChild><a href="/api/gmail/connect"><Mail/>Conectar Gmail</a></Button></>}</aside></section></>}
+function configOnly(value: CrmConfig): CrmConfig {
+  return { senderName: value.senderName, signature: value.signature, dailySendLimit: value.dailySendLimit, timezone: value.timezone };
+}
+export function SettingsPage({ navigate, onDirtyChange }: { navigate: (view: SettingsDestination) => void; onDirtyChange: (dirty: boolean) => void }) {
+  const settings = useSettingsResource<CrmConfig>("/api/settings");
+  const gmail = useSettingsResource<GmailStatus>("/api/gmail/status");
+  const summary = useSettingsResource<SettingsSummary>("/api/settings/summary");
+  const [draft, setDraft] = useState<CrmConfig | null>(null);
+  const [active, setActive] = useState<SettingsTab>(readSettingsTab);
+  const [saving, setSaving] = useState(false);
+  const saveLock = useRef(false);
+  const config = draft || (settings.data ? configOnly(settings.data) : null);
+  const dirty = Boolean(config && settings.data && JSON.stringify(config) !== JSON.stringify(configOnly(settings.data)));
+  const current = settingsTabs.find(tab => tab.id === active)!;
+  const valid = !!config && Number.isInteger(config.dailySendLimit) && config.dailySendLimit >= 1 && config.dailySendLimit <= 500;
+
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    const pop = () => setActive(readSettingsTab());
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, []);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  function changeTab(tab: SettingsTab) {
+    if (tab === active) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set("settings", tab);
+    window.history.pushState({ ...window.history.state }, "", url);
+    setActive(tab);
+  }
+  function update(patch: Partial<CrmConfig>) { if (config) setDraft({ ...config, ...patch }); }
+  async function save() {
+    if (!config || !dirty || !valid || saveLock.current) return;
+    saveLock.current = true; setSaving(true);
+    try {
+      const saved = await requestJson<CrmConfig>("/api/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(config) });
+      settings.setData(saved); setDraft(null); toast.success("Configurações salvas."); summary.reload();
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível salvar."); }
+    finally { saveLock.current = false; setSaving(false); }
+  }
+  const summaryContent = summary.loading ? <LoadingSettings /> : summary.error ? <SettingsError message={summary.error} retry={summary.reload} /> : summary.data ? (active === "followups" ? <FollowUpSummary summary={summary.data} /> : <SendingUsage summary={summary.data} />) : null;
+  const hasAside = ["gmail", "sending", "followups"].includes(active);
+  return <div className="preferences-page">
+    <header className="preferences-header">
+      <div><p className="eyebrow"><Settings />CONFIGURAÇÕES</p><h1>Configurações</h1><p>Gerencie sua conta, preferências e comportamento do CRM.</p></div>
+      <div className="preferences-header-actions"><span className="preferences-date"><CalendarDays />{new Intl.DateTimeFormat("pt-BR", { day: "numeric", month: "long", timeZone: config?.timezone || "America/Sao_Paulo" }).format(new Date())}</span>
+        <Button onClick={save} disabled={!dirty || !valid || saving || settings.loading || !!settings.error}><Save />{saving ? "Salvando…" : "Salvar alterações"}</Button>
+        <small role="status">{dirty ? "Há alterações não salvas" : "Salvamento manual"}</small>
+      </div>
+    </header>
+    <div className={"preferences-layout" + (hasAside ? " with-context" : "")}>
+      <SettingsNavigation active={active} onChange={changeTab} />
+      <section className="preferences-content" aria-labelledby="settings-section-title">
+        <header className="preferences-section-heading"><h2 id="settings-section-title">{current.label}</h2><p>{current.description}</p></header>
+        {settings.loading ? <LoadingSettings /> : settings.error ? <SettingsError message={settings.error} retry={settings.reload} /> : config && <fieldset disabled={saving} className="preferences-fields">
+          {active === "general" && <GeneralSettings config={config} update={update} />}
+          {active === "emails" && <EmailSettings config={config} update={update} navigate={navigate} />}
+          {active === "sending" && <SendingSettings config={config} update={update} navigate={navigate} />}
+          {active === "gmail" && (gmail.loading ? <LoadingSettings /> : gmail.error ? <SettingsError message={gmail.error} retry={gmail.reload} /> : gmail.data && <GmailSettings gmail={gmail.data} onDisconnected={() => gmail.setData(value => value ? { ...value, connected: false, needsReconnect: false, account: null, scopes: [] } : value)} onSent={summary.reload} canLeave={() => !dirty || confirm("Descartar as alterações não salvas e conectar o Gmail?")} />)}
+          {active === "followups" && <FollowUpSettings navigate={navigate} />}
+          {active === "data" && (summary.loading ? <LoadingSettings /> : summary.error ? <SettingsError message={summary.error} retry={summary.reload} /> : summary.data && <DataSettings summary={summary.data} navigate={navigate} />)}
+          {active === "security" && <SecuritySettings />}
+        </fieldset>}
+        {["gmail", "sending", "followups", "data"].includes(active) && <Button variant="ghost" className="preferences-refresh" disabled={summary.loading} onClick={() => { summary.reload(); if (active === "gmail") gmail.reload(); }}><RefreshCw />Atualizar dados</Button>}
+      </section>
+      {hasAside && <aside className="preferences-context" aria-label="Resumo da seção">{summaryContent}</aside>}
+    </div>
+  </div>;
+}

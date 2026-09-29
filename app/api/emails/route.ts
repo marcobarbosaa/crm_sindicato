@@ -1,3 +1,4 @@
+import { sendingDayWindow } from "@/lib/settings";
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -28,7 +29,7 @@ export async function POST(request:NextRequest){
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient))return NextResponse.json({error:"Informe um e-mail de destinatário válido."},{status:400});
  if(!subject)return NextResponse.json({error:"Informe o assunto do e-mail."},{status:400}); if(!body)return NextResponse.json({error:"Escreva o conteúdo do e-mail."},{status:400});
  if(subject.length>200||body.length>20000)return NextResponse.json({error:"O assunto ou a mensagem ultrapassou o limite permitido."},{status:400});
- const [settings]=await db.select().from(crmSettings).where(eq(crmSettings.ownerId,owner)).limit(1);const startToday=new Date();startToday.setUTCHours(3,0,0,0);const [today]=await db.select({total:sql<number>`count(*)`}).from(emailMessages).where(and(eq(emailMessages.ownerId,owner),eq(emailMessages.status,"SENT"),gte(emailMessages.sentAt,sql`${startToday.getTime()}`)));if(Number(today?.total||0)>=(settings?.dailySendLimit||100))return NextResponse.json({error:"Seu limite diário de envios foi atingido. Ajuste-o em Configurações ou aguarde o próximo dia."},{status:429});if(settings?.signature)body=`${body}\n\n${settings.signature}`;
+ const [settings]=await db.select().from(crmSettings).where(eq(crmSettings.ownerId,owner)).limit(1);const {start:startToday}=sendingDayWindow(settings?.timezone);const [today]=await db.select({total:sql<number>`count(*)`}).from(emailMessages).where(and(eq(emailMessages.ownerId,owner),eq(emailMessages.status,"SENT"),gte(emailMessages.sentAt,sql`${startToday.getTime()}`)));if(Number(today?.total||0)>=(settings?.dailySendLimit||100))return NextResponse.json({error:"Seu limite diário de envios foi atingido. Ajuste-o em Configurações ou aguarde o próximo dia."},{status:429});if(settings?.signature)body=`${body}\n\n${settings.signature}`;
  const [account]=await db.select().from(emailAccounts).where(and(eq(emailAccounts.ownerId,owner),eq(emailAccounts.provider,"GMAIL"))).limit(1); if(!account)return NextResponse.json({error:"Conecte uma conta Gmail antes de enviar."},{status:409});
  if(!account.scopes.split(/\s+/).includes(GMAIL_SEND_SCOPE))return NextResponse.json({error:"Reconecte o Gmail e autorize a permissão de envio antes de continuar."},{status:409});
  if(settings?.senderName)account.email=`${settings.senderName.replace(/[\r\n<>]/g," ").trim()} <${account.email}>`;

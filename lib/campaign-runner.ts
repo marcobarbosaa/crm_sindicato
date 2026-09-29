@@ -1,3 +1,4 @@
+import { sendingDayWindow } from "@/lib/settings";
 import { and, asc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activityLogs, crmSettings, emailAccounts, emailCampaignRecipients, emailCampaigns, emailMessages, emailTemplates } from "@/db/schema";
@@ -11,13 +12,7 @@ const STALE_PROCESSING_MS=10*60_000;
 const MAX_ATTEMPTS=3;
 const personalize=(value:string,data:Record<string,string>)=>value.replace(/{{\s*(empresa|contato|segmento|cidade|estado|email_empresa)\s*}}/g,(_,key:string)=>data[key]||"");
 
-function getSaoPauloDayWindow(now=new Date()){
- const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(now);
- const value=(type:string)=>parts.find(part=>part.type===type)?.value||"";
- const start=new Date(`${value("year")}-${value("month")}-${value("day")}T00:00:00-03:00`);
- const next=new Date(start.getTime()+24*60*60_000);
- return {start,next};
-}
+
 
 function classifyGmailFailure(status:number,message:string){
  const normalized=message.toLowerCase();
@@ -55,7 +50,7 @@ export async function claimCampaign(ownerId:string,campaignId:number){
 export async function getCampaignBatch(ownerId:string,campaignId:number){
  const db=getDb();const [campaign]=await db.select().from(emailCampaigns).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,ownerId))).limit(1);
  if(!campaign)throw new Error("Campanha não encontrada.");if(!["READY","RUNNING"].includes(campaign.status))throw new Error("A campanha não está pronta para processamento.");
- const [settings]=await db.select().from(crmSettings).where(eq(crmSettings.ownerId,ownerId)).limit(1);const {start,next}=getSaoPauloDayWindow();
+ const [settings]=await db.select().from(crmSettings).where(eq(crmSettings.ownerId,ownerId)).limit(1);const {start,next}=sendingDayWindow(settings?.timezone);
  const [{total}]=await db.select({total:sql<number>`count(*)`}).from(emailMessages).where(and(eq(emailMessages.ownerId,ownerId),eq(emailMessages.status,"SENT"),gte(emailMessages.sentAt,sql`${start.getTime()}`),lte(emailMessages.sentAt,sql`${next.getTime()-1}`)));
  const remaining=Math.max(0,(settings?.dailySendLimit||100)-Number(total||0)),take=Math.min(campaign.batchSize,remaining);
  const recipients=take>0?await db.select().from(emailCampaignRecipients).where(and(eq(emailCampaignRecipients.campaignId,campaignId),eq(emailCampaignRecipients.status,"PENDING"))).orderBy(asc(emailCampaignRecipients.id)).limit(take):[];

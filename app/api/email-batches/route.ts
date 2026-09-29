@@ -1,3 +1,4 @@
+import { sendingDayWindow } from "@/lib/settings";
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -18,7 +19,7 @@ export async function POST(request:NextRequest){
  if(!input.confirmed)return NextResponse.json({error:"Confirme explicitamente o envio em lote."},{status:400});
  if(!ids.length)return NextResponse.json({error:"Selecione pelo menos uma empresa."},{status:400});
  if(ids.length>LIMIT)return NextResponse.json({error:`Selecione no máximo ${LIMIT} empresas por lote.`},{status:400});
- const [settings]=await db.select().from(crmSettings).where(eq(crmSettings.ownerId,owner)).limit(1);const startToday=new Date();startToday.setUTCHours(3,0,0,0);const [today]=await db.select({total:sql<number>`count(*)`}).from(emailMessages).where(and(eq(emailMessages.ownerId,owner),eq(emailMessages.status,"SENT"),gte(emailMessages.sentAt,sql`${startToday.getTime()}`)));const remaining=(settings?.dailySendLimit||100)-Number(today?.total||0);if(remaining<=0||ids.length>remaining)return NextResponse.json({error:`O lote ultrapassa seu limite diário. Restam ${Math.max(0,remaining)} envio(s) hoje.`},{status:429});
+ const [settings]=await db.select().from(crmSettings).where(eq(crmSettings.ownerId,owner)).limit(1);const {start:startToday}=sendingDayWindow(settings?.timezone);const [today]=await db.select({total:sql<number>`count(*)`}).from(emailMessages).where(and(eq(emailMessages.ownerId,owner),eq(emailMessages.status,"SENT"),gte(emailMessages.sentAt,sql`${startToday.getTime()}`)));const remaining=(settings?.dailySendLimit||100)-Number(today?.total||0);if(remaining<=0||ids.length>remaining)return NextResponse.json({error:`O lote ultrapassa seu limite diário. Restam ${Math.max(0,remaining)} envio(s) hoje.`},{status:429});
  const [account]=await db.select().from(emailAccounts).where(and(eq(emailAccounts.ownerId,owner),eq(emailAccounts.provider,"GMAIL"))).limit(1);
  if(!account||!account.scopes.split(/\s+/).includes(SEND_SCOPE))return NextResponse.json({error:"Conecte o Gmail com permissão de envio antes de continuar."},{status:409});
  if(settings?.senderName)account.email=`${settings.senderName.replace(/[\r\n<>]/g," ").trim()} <${account.email}>`;

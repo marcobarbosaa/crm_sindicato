@@ -88,12 +88,8 @@ const nav = [
 ] as const;
 export function CrmApp() {
   const [templateDirty, setTemplateDirty] = useState(false);
-  const [view, setView] = useState<View>(() =>
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).has("gmail")
-      ? "emails"
-      : "dashboard",
-  ),
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [view, setView] = useState<View>("dashboard"),
     [menuOpen, setMenuOpen] = useState(false),
     [metrics, setMetrics] = useState<Metrics | null>(null),
     [refreshKey, setRefreshKey] = useState(0),
@@ -127,6 +123,14 @@ export function CrmApp() {
       document.removeEventListener("click", help);
       card?.removeEventListener("keydown", keyboard);
     };
+  }, []);
+  useEffect(() => {
+    // Match the server's first render before restoring a URL-selected section.
+    void Promise.resolve().then(() => {
+      const query = new URLSearchParams(window.location.search);
+      if (query.has("settings")) setView("settings");
+      else if (query.has("gmail")) setView("emails");
+    });
   }, []);
   const refreshCompanies = useCallback(() => {
     setRefreshKey((key) => key + 1);
@@ -164,6 +168,33 @@ export function CrmApp() {
       refreshCompanies();
     } else toast.error("Não foi possível excluir a empresa.");
   }
+  function navigate(next: View) {
+    if (next === view) { setMenuOpen(false); return; }
+    if ((view === "settings" && settingsDirty || view === "templates" && templateDirty) &&
+        !confirm("Descartar as alterações não salvas?")) return;
+    const url = new URL(window.location.href);
+    if (next === "settings") url.searchParams.set("settings", "general");
+    else url.searchParams.delete("settings");
+    window.history.pushState({ ...window.history.state, crmView: next }, "", url);
+    setSettingsDirty(false);
+    setView(next);
+    setMenuOpen(false);
+  }
+  useEffect(() => {
+    const pop = (event: PopStateEvent) => {
+      const next = new URLSearchParams(window.location.search).has("settings") ? "settings" : event.state?.crmView || "dashboard";
+      if (view === "settings" && next !== view && settingsDirty && !confirm("Descartar as alterações não salvas?")) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("settings", "general");
+        window.history.pushState({ ...window.history.state, crmView: "settings" }, "", url);
+        window.dispatchEvent(new Event("popstate"));
+        return;
+      }
+      setView(next); if (next !== "settings") setSettingsDirty(false);
+    };
+    window.addEventListener("popstate", pop);
+    return () => window.removeEventListener("popstate", pop);
+  }, [view, settingsDirty]);
   const currentLabel = nav.find(([id]) => id === view)?.[1];
   return (
     <div className="app-shell">
@@ -189,11 +220,7 @@ export function CrmApp() {
             <button
               key={id}
               className={view === id ? "active" : ""}
-              onClick={() => {
-                if (view === "templates" && id !== view && templateDirty && !confirm("Descartar as alterações não salvas deste template?")) return;
-                setView(id);
-                setMenuOpen(false);
-              }}
+              onClick={() => navigate(id)}
             >
               <Icon />
               <span>{label}</span>
@@ -227,7 +254,7 @@ export function CrmApp() {
         />
       )}
       <main>
-        <header className="topbar">
+        <header className={view === "settings" ? "topbar settings-topbar" : "topbar"}>
           <button
             className="menu-button"
             onClick={() => setMenuOpen(true)}
@@ -239,7 +266,7 @@ export function CrmApp() {
             <span>Workspace</span>
             <strong>{currentLabel}</strong>
           </div>
-          <div className="top-actions">
+          {view !== "settings" && <div className="top-actions">
             <button className="icon-button" aria-label="Ajuda">
               <CircleHelp />
             </button>
@@ -248,7 +275,7 @@ export function CrmApp() {
               onOpenChange={setDialogOpen}
               onSaved={refreshCompanies}
             />
-          </div>
+          </div>}
         </header>
         <div className="content">
           {view === "dashboard" ? (
@@ -270,6 +297,8 @@ export function CrmApp() {
             <ImportPage onImported={refreshCompanies} />
           ) : view === "templates" ? (
             <TemplatesPage onDirtyChange={setTemplateDirty} />
+          ) : view === "settings" ? (
+            <SettingsPage navigate={navigate} onDirtyChange={setSettingsDirty} />
           ) : view === "emails" ? (
             <EmailsPage />
           ) : (
@@ -646,7 +675,7 @@ function ComingSoon({
   if (view === "batch") return <BatchEmailsPage />;
   if (view === "followups") return <FollowUpsPage />;
   if (view === "contacts") return <ContactsPage />;
-  if (view === "settings") return <SettingsPage />;
+
   const item = nav.find(([id]) => id === view);
   const Icon = item?.[2] || Settings;
   return (
