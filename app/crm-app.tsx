@@ -270,11 +270,11 @@ export function CrmApp() {
             <button className="icon-button" aria-label="Ajuda">
               <CircleHelp />
             </button>
-            <CompanyDialog
+            {view !== "batch" && <CompanyDialog
               open={dialogOpen}
               onOpenChange={setDialogOpen}
               onSaved={refreshCompanies}
-            />
+            />}
           </div>}
         </header>
         <div className="content">

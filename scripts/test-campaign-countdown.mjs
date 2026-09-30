@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import ts from "typescript";
+const source = ts.transpileModule(readFileSync(new URL("../lib/campaign-monitoring.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
+const { formatCountdown, remainingTime } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+const now = Date.parse("2026-09-30T14:00:00Z");
+assert.equal(formatCountdown(remainingTime("2026-09-30T14:07:42Z", now)), "07:42");
+assert.equal(formatCountdown(remainingTime("2026-10-01T01:00:00Z", now)), "11:00:00");
+assert.equal(formatCountdown(remainingTime("2026-09-30T13:59:59Z", now)), "00:00");
+assert.equal(remainingTime(null, now), 0);
+assert.equal(remainingTime("invalid", now), 0);
+assert.equal(formatCountdown(1), "00:01");
+assert.equal(formatCountdown(60000), "01:00");
+assert.equal(formatCountdown(3600000), "01:00:00");
+assert.equal(formatCountdown(-60000), "00:00");
+console.log("9 countdown boundary checks passed.");
