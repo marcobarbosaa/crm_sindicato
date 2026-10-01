@@ -12,12 +12,12 @@ export function useCampaignClock() {
   return now;
 }
 
-export function CampaignCountdown({ nextRunAt, status }: { nextRunAt?: string | null; status: string }) {
+export function CampaignCountdown({ nextRunAt, status, continuing = false }: { nextRunAt?: string | null; status: string; continuing?: boolean }) {
   const now = useCampaignClock();
   if (status !== "RUNNING") return null;
   const remaining = remainingTime(nextRunAt, now);
   return <div className="cm-countdown" aria-live="off">
-    {remaining > 0 ? <><span>Será iniciado em</span><strong>{formatCountdown(remaining)}</strong></>
-      : <strong className="cm-preparing">Preparando próximo lote…</strong>}
+    {remaining > 0 ? <><span>{continuing ? "Continuação prevista em" : "Será iniciado em"}</span><strong>{formatCountdown(remaining)}</strong></>
+      : <strong className="cm-preparing">{continuing ? "Aguardando continuação do lote…" : "Preparando próximo lote…"}</strong>}
   </div>;
 }

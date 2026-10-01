@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, desc, eq, gte, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { crmSettings, emailCampaignRecipients, emailCampaigns, emailMessages } from "@/db/schema";
+import { dailyCampaignUsage } from "@/lib/campaign-quota";
 import { sendingDayWindow } from "@/lib/settings";
 
 // Read-only snapshot. No reconciliation, claims or sends during polling.
@@ -15,16 +16,13 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   const [settings] = await db.select().from(crmSettings).where(eq(crmSettings.ownerId, owner)).limit(1);
   const { start, next } = sendingDayWindow(settings?.timezone);
   const [usage, counts, activities] = await Promise.all([
-    db.select({ total: sql<number>`count(*)` }).from(emailMessages).where(and(
-      eq(emailMessages.ownerId, owner), eq(emailMessages.status, "SENT"),
-      gte(emailMessages.sentAt, sql`${start.getTime()}`), lte(emailMessages.sentAt, sql`${next.getTime() - 1}`),
-    )),
+    db.select({ total: sql<number>`count(*)` }).from(emailMessages).where(dailyCampaignUsage(owner, start, next)),
     db.select({ status: emailCampaignRecipients.status, total: sql<number>`count(*)` })
       .from(emailCampaignRecipients).where(eq(emailCampaignRecipients.campaignId, id)).groupBy(emailCampaignRecipients.status),
     db.select({ id: emailCampaignRecipients.id, companyName: emailCampaignRecipients.companyName,
       recipient: emailCampaignRecipients.recipient, status: emailCampaignRecipients.status,
-      errorMessage: emailCampaignRecipients.errorMessage, updatedAt: emailCampaignRecipients.updatedAt })
-      .from(emailCampaignRecipients).where(and(eq(emailCampaignRecipients.campaignId, id), ne(emailCampaignRecipients.status, "PENDING")))
+      failureCategory: emailCampaignRecipients.failureCategory, errorMessage: emailCampaignRecipients.errorMessage, updatedAt: emailCampaignRecipients.updatedAt })
+      .from(emailCampaignRecipients).where(and(eq(emailCampaignRecipients.campaignId, id), or(ne(emailCampaignRecipients.status, "PENDING"), isNotNull(emailCampaignRecipients.errorMessage))))
       .orderBy(desc(emailCampaignRecipients.updatedAt), desc(emailCampaignRecipients.id)).limit(8),
   ]);
   const count = (status: string) => Number(counts.find(row => row.status === status)?.total || 0);

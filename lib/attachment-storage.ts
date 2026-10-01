@@ -20,7 +20,7 @@ export function attachmentStorage(): AttachmentStorage {
       if (!r.ok) throw new Error("Não foi possível armazenar o anexo. Verifique a configuração do bucket.");
     },
     async get(key) {
-      const r = await fetch(base + "/authenticated/" + path(key), { headers, signal: AbortSignal.timeout(30_000) });
+      const r = await fetch(base + "/authenticated/" + path(key), { headers, redirect: "error", signal: AbortSignal.timeout(30_000) });
       if (!r.ok) throw new Error("Não foi possível recuperar um anexo. Tente novamente.");
       return new Uint8Array(await r.arrayBuffer());
     },

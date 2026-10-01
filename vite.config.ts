@@ -10,7 +10,7 @@ const workerVars: Record<string, string> = isCloudflareDeploy
 
 const localBindingConfig = {
   main: "./worker.ts",
-  triggers: { crons: ["*/5 * * * *"] },
+  triggers: { crons: ["* * * * *", "*/5 * * * *"] },
   observability: { enabled: true },
   compatibility_flags: ["nodejs_compat"],
   vars: workerVars,

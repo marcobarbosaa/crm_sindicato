@@ -22,22 +22,21 @@ export async function POST(request:NextRequest,context:{params:Promise<{id:strin
   if(campaign.status!=="RUNNING")return NextResponse.json({error:"Somente campanhas em execução podem ser pausadas."},{status:409});
   // Não libera um lock ativo: o lote que já foi adquirido pode terminar com segurança,
   // mas nenhum novo lote será iniciado enquanto a campanha estiver pausada.
-  const [updated]=await db.update(emailCampaigns).set({status:"PAUSED",nextRunAt:null,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner),eq(emailCampaigns.status,"RUNNING"))).returning();
+  const [updated]=await db.update(emailCampaigns).set({status:"PAUSED",updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner),eq(emailCampaigns.status,"RUNNING"))).returning();
   return NextResponse.json(updated);
  }
  if(body.action==="resume"){
   if(campaign.status!=="PAUSED")return NextResponse.json({error:"Somente campanhas pausadas podem ser retomadas."},{status:409});
   const [{unresolved}]=await db.select({unresolved:sql<number>`count(*)`}).from(emailCampaignRecipients).where(and(eq(emailCampaignRecipients.campaignId,campaignId),or(eq(emailCampaignRecipients.status,"UNCERTAIN"),eq(emailCampaignRecipients.status,"PROCESSING"))));
   if(Number(unresolved||0)>0)return NextResponse.json({error:"Aguarde o processamento atual terminar ou revise todos os envios com resultado incerto antes de retomar a campanha."},{status:409});
-  const lockActive=campaign.lockUntil&&campaign.lockUntil.getTime()>now.getTime();
-  // Sem destinatários PROCESSING/UNCERTAIN, um lock antigo pode ser descartado com segurança.
-  // Isso evita uma campanha ficar parada até a expiração de um lock órfão após interrupção do Worker.
-  const [updated]=await db.update(emailCampaigns).set({status:"RUNNING",nextRunAt:now,lockUntil:lockActive?null:campaign.lockUntil,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner),eq(emailCampaigns.status,"PAUSED"))).returning();
+
+  // Preserve o lease: o Worker pode estar preparando anexos antes de criar PROCESSING.
+  const [updated]=await db.update(emailCampaigns).set({status:"RUNNING",nextRunAt:campaign.nextRunAt&&campaign.nextRunAt>now?campaign.nextRunAt:now,lockUntil:campaign.lockUntil,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner),eq(emailCampaigns.status,"PAUSED"))).returning();
   return NextResponse.json(updated);
  }
  if(body.action==="cancel"){
   if(!["READY","RUNNING","PAUSED"].includes(campaign.status))return NextResponse.json({error:"Esta campanha não pode mais ser cancelada."},{status:409});
-  const [updated]=await db.update(emailCampaigns).set({status:"CANCELLED",nextRunAt:null,lockUntil:null,completedAt:now,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner),eq(emailCampaigns.status,campaign.status))).returning();
+  const [updated]=await db.update(emailCampaigns).set({status:"CANCELLED",nextRunAt:null,completedAt:now,updatedAt:now}).where(and(eq(emailCampaigns.id,campaignId),eq(emailCampaigns.ownerId,owner),eq(emailCampaigns.status,campaign.status))).returning();
   if(!updated)return NextResponse.json({error:"O estado da campanha mudou. Atualize a tela e tente novamente."},{status:409});
   return NextResponse.json(updated);
  }

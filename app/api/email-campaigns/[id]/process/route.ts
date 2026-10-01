@@ -10,8 +10,8 @@ export async function POST(...[, context]: [NextRequest, {params:Promise<{id:str
  try{
   const result=await processCampaignBatch(ownerId(),campaignId);
   return NextResponse.json(result);
- }catch(error){
-  console.error(`[campaign ${campaignId}] falha ao processar lote`,error);
-  return NextResponse.json({error:error instanceof Error?error.message:"Não foi possível processar a campanha."},{status:500});
+ }catch{
+  console.error({event:"campaign.request",campaignId,category:"INFRASTRUCTURE_FAILURE"});
+  return NextResponse.json({error:"Não foi possível processar a campanha agora. Tente novamente."},{status:500});
  }
 }

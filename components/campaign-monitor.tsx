@@ -11,6 +11,8 @@ import type { CampaignMonitoring } from "@/lib/campaign-monitoring";
 export type CampaignMonitorData = {
   id: number; name: string; status: string; total?: number; pending?: number; sent?: number;
   failed?: number; skipped?: number; batchSize?: number; intervalMinutes?: number;
+  logicalBatch?: { id: string; recipientIds: number[]; startedAt: number } | null;
+  processingNotice?: string | null;
   nextRunAt?: string | null; startedAt?: string | null; lockUntil?: string | null;
   createdAt?: string; completedAt?: string | null;
 };
@@ -41,7 +43,7 @@ function CampaignHeader({ campaign, reviewRequired, timezone }: { campaign: Camp
       </div>
     </div>
     <div className="cm-settings"><h2><span className="cm-icon"><Settings2 aria-hidden="true" /></span>Configurações da campanha</h2>
-      <div><MailCheck /><p><strong>{campaign.batchSize ?? "—"} e-mails por lote</strong><span>Quantidade máxima em cada execução</span></p></div>
+      <div><MailCheck /><p><strong>{campaign.batchSize ?? "—"} e-mails por lote</strong><span>Quantidade máxima por lote</span></p></div>
       <div><Clock3 /><p><strong>{campaign.intervalMinutes ?? "—"} minutos</strong><span>Intervalo entre os lotes</span></p></div>
     </div>
   </header>;
@@ -159,7 +161,7 @@ export function CampaignMonitor({ initialCampaign }: { initialCampaign: Campaign
   const cycleTitle = reviewRequired ? "Revisão necessária" : campaign.status === "PAUSED" ? "Campanha pausada"
     : campaign.status === "COMPLETED" ? "Campanha concluída" : campaign.status === "CANCELLED" ? "Campanha cancelada"
     : sending ? "Enviando lote atual…" : dailyLimited && running ? "Limite diário atingido"
-    : campaign.status === "READY" ? "Campanha pronta" : "Próximo lote";
+    : campaign.status === "READY" ? "Campanha pronta" : campaign.logicalBatch ? "Continuação do lote atual" : "Próximo lote";
   const canResume = !reviewRequired && !!monitoring && !reviewError && !syncError;
   const startButton = campaign.status === "READY" ? <Button disabled={busy || syncError} onClick={() => control("start")}><Play />Iniciar campanha</Button> : null;
   const resumeButton = campaign.status === "PAUSED" && !reviewRequired ? <Button disabled={busy || !canResume} onClick={() => control("resume")}><RotateCcw />Retomar campanha</Button> : null;
@@ -167,6 +169,7 @@ export function CampaignMonitor({ initialCampaign }: { initialCampaign: Campaign
   return <div className="campaign-monitor">
     <div className="cm-page-intro"><h2>Envio em lote</h2><p>Acompanhe o processamento da campanha e o resultado de cada envio.</p></div>
     <CampaignHeader campaign={campaign} reviewRequired={reviewRequired} timezone={timezone} />
+    {campaign.processingNotice && <p className="cm-notice" role="status"><Clock3 />{campaign.processingNotice}</p>}
     {(syncError || reviewError) && <p className="cm-notice" role="status"><AlertTriangle />Não foi possível atualizar agora. Tentaremos novamente.{reviewError && " A lista de revisão não pôde ser sincronizada."}</p>}
     {processError && running && <p className="cm-notice" role="alert"><AlertTriangle />{processError} O processamento será verificado novamente.</p>}
     {reviewRequired && <section className="cm-card cm-review" aria-labelledby="cm-review-title">
@@ -206,7 +209,7 @@ export function CampaignMonitor({ initialCampaign }: { initialCampaign: Campaign
           : sending ? <><p>O servidor está processando o lote. Os resultados serão atualizados automaticamente.</p><div className="cm-interval" aria-hidden="true"><span /></div></>
           : running && dailyLimited ? <><strong className="cm-limit">Cota de hoje utilizada</strong><p>Os envios aguardam a próxima janela diária.</p><small>{campaign.nextRunAt && monitoring && Date.parse(campaign.nextRunAt) >= Date.parse(monitoring.nextDailyWindow) ? `Retomada programada para ${date(campaign.nextRunAt, timezone)}.` : `Nova janela em ${date(monitoring?.nextDailyWindow, timezone)}. Aguardando confirmação do agendamento.`}</small></>
           : campaign.status === "READY" ? <><p>{nextSize === null ? "Sincronizando a quantidade do primeiro lote…" : dailyLimited ? "O limite diário foi atingido. Ao iniciar, a campanha aguardará a próxima janela." : `Até ${nextSize} e-mails serão processados no primeiro lote.`}</p>{startButton}</>
-          : running ? <><CampaignCountdown nextRunAt={campaign.nextRunAt} status={campaign.status} /><p>{nextSize === null ? "Sincronizando a quantidade do próximo lote…" : `Até ${nextSize} e-mails no próximo lote`}</p><div className="cm-interval" aria-hidden="true"><span /></div><small>{campaign.nextRunAt ? `Próxima execução: ${date(campaign.nextRunAt, timezone)}` : "Aguardando confirmação do próximo horário."}</small></>
+          : running ? <><CampaignCountdown nextRunAt={campaign.nextRunAt} status={campaign.status} continuing={!!campaign.logicalBatch} /><p>{nextSize === null ? "Sincronizando a quantidade do próximo lote…" : campaign.logicalBatch ? "Concluindo o lote atual; o intervalo começa após seu término." : `Até ${nextSize} e-mails no próximo lote`}</p><div className="cm-interval" aria-hidden="true"><span /></div><small>{campaign.nextRunAt ? `Próxima execução: ${date(campaign.nextRunAt, timezone)}` : "Aguardando confirmação do próximo horário."}</small></>
           : <p>A campanha ainda não foi preparada para envio.</p>}
         {monitoring && activeStatuses.includes(campaign.status) && <div className="cm-quota"><span>Disponível hoje · sua conta</span><strong>{number(monitoring.remainingToday)} de {number(monitoring.dailySendLimit)}</strong><small>A cota é compartilhada com outros envios.</small></div>}
       </aside>
@@ -225,7 +228,7 @@ export function CampaignMonitor({ initialCampaign }: { initialCampaign: Campaign
       {!monitoring ? <p className="cm-empty">Aguardando os registros da campanha…</p> : monitoring.activities.length === 0 ? <p className="cm-empty">Nenhuma atividade de destinatário registrada ainda.</p>
         : <ul>{monitoring.activities.map(item => <li key={item.id}>
           <span className={`cm-activity-icon ${item.status.toLowerCase()}`}>{item.status === "SENT" ? <CheckCircle2 /> : item.status === "FAILED" || item.status === "UNCERTAIN" ? <AlertTriangle /> : <Clock3 />}</span>
-          <div><strong>{{ SENT: "Envio registrado", FAILED: "Falha no envio", SKIPPED: "Destinatário ignorado", PROCESSING: "Envio em processamento", UNCERTAIN: "Revisão necessária" }[item.status] || item.status} · {item.companyName}</strong><p>{item.recipient}</p>{item.errorMessage && <small>{item.errorMessage}</small>}</div>
+          <div><strong>{{ PENDING: "Processamento adiado", SENT: "Envio registrado", FAILED: "Falha no envio", SKIPPED: "Destinatário ignorado", PROCESSING: "Envio em processamento", UNCERTAIN: "Revisão necessária" }[item.status] || item.status} · {item.companyName}</strong><p>{item.recipient}</p>{item.errorMessage && <small>{item.errorMessage}</small>}</div>
           <time dateTime={item.updatedAt}>{date(item.updatedAt, timezone)}</time>
         </li>)}</ul>}
     </section>

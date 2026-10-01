@@ -171,6 +171,15 @@ try {
   await screenshot("polling-error"); failMonitor = false;
   await waitFor("!document.querySelector('.cm-notice')"); checks.push("polling failure retains data and recovers");
 
+  campaign = { ...fixture(), logicalBatch: { id: "logical-batch", recipientIds: [1, 2], startedAt: Date.now() }, processingNotice: "Processamento adiado. Será tentado novamente." };
+  monitoring.activities = [{ id: 4, companyName: "Empresa adiada", recipient: "adiado@example.test", status: "PENDING", failureCategory: "INFRASTRUCTURE_FAILURE", errorMessage: "Limite temporário da infraestrutura atingido. Será tentado novamente.", updatedAt: iso(0) }];
+  await openMonitor();
+  await waitFor("document.querySelector('.cm-activity')?.textContent.includes('Processamento adiado')");
+  assert.equal(await evaluate("document.querySelector('.cm-activity').textContent.includes('Falha no envio')"), false);
+  await waitFor("document.querySelector('.cm-cycle')?.textContent.includes('Concluindo o lote atual')");
+  assert.equal(await evaluate("document.querySelector('#cm-cycle-title').textContent"), "Continuação do lote atual");
+  await screenshot("infrastructure-deferred"); checks.push("infrastructure deferral is not a permanent send failure", "logical batch continuation");
+
   campaign = { ...fixture(), nextRunAt: iso(1800) }; holdProcessing = true; await openMonitor();
   await waitFor("document.querySelector('.cm-countdown')?.textContent.includes('Preparando próximo lote')");
   assert.equal(await evaluate("document.querySelector('#cm-cycle-title').textContent"), "Próximo lote");

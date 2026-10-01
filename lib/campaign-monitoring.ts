@@ -26,6 +26,7 @@ export type CampaignMonitoring = {
     recipient: string;
     status: string;
     errorMessage: string | null;
+    failureCategory?: string | null;
     updatedAt: string;
   }[];
 };

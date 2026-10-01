@@ -1,58 +1,31 @@
-import vinextHandler from "vinext/server/fetch-handler";
+﻿import vinextHandler from "vinext/server/fetch-handler";
 
-const MAX_CAMPAIGNS_PER_RUN = 5;
-
-// Keep the framework's HTTP entrypoint (routing, RSC, assets and context) intact.
+// Different cron events have independent subrequest budgets. Promise.all inside
+// a single event does NOT create fresh Worker invocations.
+const CAMPAIGN_CRON = "* * * * *";
 export default {
-  fetch(request, env, ctx) {
-    return vinextHandler.fetch(request, env, ctx);
-  },
-
+  fetch(request, env, ctx) { return vinextHandler.fetch(request, env, ctx); },
   async scheduled(controller) {
     const startedAt = Date.now();
-    const event = {
-      event: "scheduled.maintenance",
-      cron: controller.cron,
-      scheduledTime: controller.scheduledTime,
-    };
-
+    const event = { event: "scheduled.maintenance", cron: controller.cron, scheduledTime: controller.scheduledTime };
     console.info({ ...event, status: "started" });
     try {
-      // Carregue as rotinas de manutenção somente quando o cron realmente rodar.
-      // Isso mantém o entrypoint HTTP do Vinext leve durante o `pnpm dev`.
-      const [{ findDueCampaigns, processCampaignBatch }, { cleanupAttachments }] = await Promise.all([
-        import("./lib/campaign-runner"),
-        import("./lib/attachment-service"),
-      ]);
-
-      // Campanhas vencidas são processadas pelo servidor, independentemente de
-      // qualquer página estar aberta no navegador.
-      const due = await findDueCampaigns(MAX_CAMPAIGNS_PER_RUN);
-      const campaignResults = await Promise.allSettled(
-        due.map(campaign => processCampaignBatch(campaign.ownerId, Number(campaign.id))),
-      );
-      const campaignFailures = campaignResults.filter(result => result.status === "rejected").length;
-
-      // A mesma execução periódica continua responsável pela limpeza dos anexos.
-      const cleanup = await cleanupAttachments();
-      const summary = {
-        ...event,
-        campaignsChecked: due.length,
-        campaignFailures,
-        attachmentsDeleted: cleanup.deleted,
-        attachmentsPending: cleanup.pending,
-        durationMs: Date.now() - startedAt,
-      };
-
-      if (campaignFailures > 0 || cleanup.pending > 0) {
-        console.error({ ...summary, status: "partial" });
-        throw new Error("Scheduled maintenance incomplete. Pending work will be retried on a later run.");
-      }
-
-      console.info({ ...summary, status: "completed" });
+      const { withCampaignDb } = await import("./db");
+      await withCampaignDb(async () => {
+        if (controller.cron === CAMPAIGN_CRON) {
+          const { findDueCampaigns, processCampaignBatch } = await import("./lib/campaign-runner");
+          const due = await findDueCampaigns(1);
+          for (const campaign of due) await processCampaignBatch(campaign.ownerId, Number(campaign.id));
+          console.info({ ...event, status: "completed", campaignsChecked: due.length, durationMs: Date.now() - startedAt });
+        } else {
+          const { cleanupAttachments } = await import("./lib/attachment-service");
+          const cleanup = await cleanupAttachments();
+          console.info({ ...event, status: cleanup.pending ? "partial" : "completed", ...cleanup, durationMs: Date.now() - startedAt });
+          if (cleanup.pending) throw new Error("Scheduled cleanup incomplete.");
+        }
+      });
     } catch {
       console.error({ ...event, status: "failed", durationMs: Date.now() - startedAt });
-      // Do not expose provider errors, connection strings or secrets in logs.
       throw new Error("Scheduled maintenance failed. Check campaign, database and storage configuration.");
     }
   },

@@ -26,10 +26,36 @@ export async function decryptToken(value:string) {
   return new TextDecoder().decode(decrypted);
 }
 
+const OAUTH_CODES = ["invalid_grant", "invalid_client", "unauthorized_client", "invalid_request", "access_denied", "temporarily_unavailable", "server_error", "missing_configuration"];
+
+// Never expose Google's free-form error_description: it is untrusted text.
+export class GmailOAuthError extends Error {
+  readonly oauthCode: string;
+  readonly code: string;
+  readonly requiresReconnect: boolean;
+  readonly requiresUserAction: boolean;
+  constructor(readonly httpStatus: number, oauthCode: unknown) {
+    const normalized = typeof oauthCode === "string" && OAUTH_CODES.includes(oauthCode) ? oauthCode : "unknown_error";
+    const reconnect = normalized === "invalid_grant" || normalized === "access_denied";
+    const configuration = ["invalid_client", "unauthorized_client", "invalid_request", "missing_configuration"].includes(normalized);
+    super(reconnect
+      ? "A autorização do Gmail expirou ou foi revogada. Reconecte a conta em Configurações → Gmail e depois retome a campanha."
+      : configuration
+        ? "Não foi possível autenticar o aplicativo no Google. Verifique GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET antes de retomar a campanha."
+        : "O Google não conseguiu renovar o acesso ao Gmail agora. O processamento será tentado novamente.");
+    this.name = "GmailOAuthError";
+    this.oauthCode = normalized;
+    this.requiresReconnect = reconnect;
+    this.requiresUserAction = reconnect || configuration;
+    this.code = reconnect ? "GMAIL_REAUTH_REQUIRED" : configuration ? "GMAIL_OAUTH_CONFIGURATION" : "GMAIL_OAUTH_UNAVAILABLE";
+  }
+}
+
 export async function refreshAccessToken(refreshToken:string) {
-  const response = await fetch("https://oauth2.googleapis.com/token", { method:"POST", headers:{"content-type":"application/x-www-form-urlencoded"}, body:new URLSearchParams({ client_id:googleClientId(), client_secret:googleClientSecret(), refresh_token:refreshToken, grant_type:"refresh_token" }) });
-  const data = await response.json() as { access_token?:string; error_description?:string };
-  if (!response.ok || !data.access_token) throw new Error(data.error_description || "Não foi possível renovar o acesso ao Gmail.");
+  if (!googleClientId() || !googleClientSecret()) throw new GmailOAuthError(0, "missing_configuration");
+  const response = await fetch("https://oauth2.googleapis.com/token", { method:"POST", headers:{"content-type":"application/x-www-form-urlencoded"}, redirect:"error", signal:AbortSignal.timeout(30_000), body:new URLSearchParams({ client_id:googleClientId(), client_secret:googleClientSecret(), refresh_token:refreshToken, grant_type:"refresh_token" }) });
+  const data = await response.json().catch(() => null) as { access_token?: unknown; error?: unknown } | null;
+  if (!response.ok || typeof data?.access_token !== "string" || !data.access_token) throw new GmailOAuthError(response.status, data?.error);
   return data.access_token;
 }
 
