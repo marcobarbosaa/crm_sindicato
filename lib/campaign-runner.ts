@@ -168,7 +168,8 @@ async function processChunk(ownerId: string, campaignId: number) {
         const data = target.personalization || {}, subject = personalize(template.subject, data), messageBody = personalize(template.body, data);
         const body = batch.settings?.signature ? `${messageBody}\n\n${batch.settings.signature}` : messageBody;
         stage = "encode";
-        const raw = encodeRawEmail({ from, to: target.recipient, subject, body, attachments });
+        const rfcMessageId = `<${crypto.randomUUID()}@campaign.prospecta.invalid>`;
+        const raw = encodeRawEmail({ from, to: target.recipient, subject, body, attachments, messageId: rfcMessageId });
         stage = "duplicate";
         const [duplicate] = await db.select({ id: emailMessages.id }).from(emailMessages).where(and(eq(emailMessages.ownerId, ownerId), eq(emailMessages.recipient, target.recipient),
           eq(emailMessages.subject, subject), eq(emailMessages.status, "SENT"), gte(emailMessages.createdAt, sql`${Date.now() - 24 * 60 * 60_000}`))).limit(1);
@@ -185,7 +186,7 @@ async function processChunk(ownerId: string, campaignId: number) {
             .where(and(eq(emailCampaignRecipients.id, target.id), eq(emailCampaignRecipients.status, "PENDING"))).returning();
           if (!recipient) return null;
           const [message] = await tx.insert(emailMessages).values({ ownerId, companyId: target.companyId, contactId: target.contactId, templateId: template.id, campaignId,
-            recipient: target.recipient, subject, body, attachments: metadata, status: "PREPARED", kind: "BATCH", createdAt: new Date() }).returning();
+            recipient: target.recipient, subject, body, attachments: metadata, rfcMessageId, emailAccountId: account.id, senderAddress: account.email.trim().toLowerCase(), status: "PREPARED", kind: "BATCH", createdAt: new Date() }).returning();
           await tx.update(emailCampaignRecipients).set({ messageId: message.id }).where(eq(emailCampaignRecipients.id, target.id));
           return { recipient, message };
         });

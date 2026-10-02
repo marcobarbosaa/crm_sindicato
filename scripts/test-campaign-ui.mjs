@@ -57,6 +57,10 @@ async function mock({ requestId, request }) {
   let data = [], status = 200;
   if (path === "/api/email-campaigns") data = [{ ...campaign, status: ["COMPLETED", "CANCELLED"].includes(campaign.status) ? "RUNNING" : campaign.status }];
   else if (path.endsWith("/monitor")) { if (failMonitor) { status = 503; data = { error: "Falha simulada" }; } else data = { campaign, monitoring }; }
+  else if (path.endsWith("/delivery")) {
+    const category = new URL(request.url).searchParams.get("category");
+    data = { items: category && category !== "ADDRESS_NOT_FOUND" ? [] : [{ id: 1, companyName: "Empresa devolvida", recipient: "antigo@example.test", deliveryStatus: "BOUNCED", category: "ADDRESS_NOT_FOUND", smtpStatus: "5.1.1", diagnostic: "<img src=x onerror=alert(1)> user unknown", bouncedAt: iso(-60000) }], nextCursor: null, summary: { sent: 45, addressNotFound: 1, noKnownFailure: 44 }, enabled: true, needsReconnect: false, syncError: null, checkedAt: iso(0), completedAt: null };
+  }
   else if (path.endsWith("/review/recipients")) data = { recipients: reviews, campaignStatus: campaign.status };
   else if (path.endsWith("/review")) {
     const { recipientId, action } = JSON.parse(request.postData);
@@ -93,6 +97,14 @@ try {
   await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/*", requestStage: "Request" }] });
   await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false });
   await openMonitor();
+  await waitFor("document.querySelector('.cm-delivery')?.textContent.includes('Endereço inexistente')");
+  assert.equal(await evaluate("document.querySelectorAll('.cm-delivery img').length"), 0);
+  assert.equal(await evaluate("document.querySelector('.cm-delivery').textContent.includes('Sem falha conhecida')"), true);
+  await evaluate("(()=>{const el=document.querySelector('[aria-label=\"Categoria de entrega\"]');el.value='MAILBOX_FULL';el.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  await waitFor("document.querySelector('.cm-delivery')?.textContent.includes('Nenhum envio encontrado')");
+  await evaluate("(()=>{const el=document.querySelector('[aria-label=\"Categoria de entrega\"]');el.value='';el.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  await waitFor("document.querySelector('.cm-delivery-table')?.textContent.includes('Empresa devolvida')");
+  checks.push("delivery report and category filter", "hostile diagnostic rendered as text only");
   assert.equal(await evaluate("document.querySelector('[role=progressbar]').getAttribute('aria-valuetext')"), "57 de 137 processados");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Nova empresa')"), false);
   const before = await evaluate("document.querySelector('.cm-countdown strong').textContent");

@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { companies, contacts, emailCampaignRecipients, emailCampaigns } from "@/db/schema";
 import { loadSendAttachments } from "@/lib/attachment-service";
+import { audienceKnownInvalid, audienceRecipient, primaryContactId } from "@/lib/campaign-audience";
 
 const ownerId = () => "local-preview-user";
 
@@ -51,18 +52,20 @@ export async function POST(...[, context]: [NextRequest, { params: Promise<{ id:
       companyId: companies.id,
       companyName: companies.name,
       companyEmail: companies.primaryEmail,
+      recipient: audienceRecipient,
+      knownInvalid: audienceKnownInvalid,
       contactId: contacts.id,
       contactName: contacts.name,
       contactEmail: contacts.email,
     })
     .from(companies)
-    .leftJoin(contacts, and(eq(contacts.companyId, companies.id), eq(contacts.isPrimary, true)))
+    .leftJoin(contacts, and(eq(contacts.companyId, companies.id), eq(contacts.id, primaryContactId)))
     .where(condition);
 
   const now = new Date();
   const recipients = rows.flatMap((row) => {
-    const recipient = row.contactEmail?.trim().toLowerCase() || row.companyEmail?.trim().toLowerCase();
-    if (!recipient) return [];
+    const recipient = row.recipient;
+    if (!recipient || row.knownInvalid) return [];
     return [{
       campaignId,
       companyId: row.companyId,
@@ -79,8 +82,13 @@ export async function POST(...[, context]: [NextRequest, { params: Promise<{ id:
       updatedAt: now,
     }];
   });
+  const withoutEmail = rows.filter(row => !row.recipient).length;
+  const invalidEmail = rows.filter(row => row.recipient && row.knownInvalid).length;
 
-  await db.transaction(async (tx) => {
+  const prepared = await db.transaction(async (tx) => {
+    const [current] = await tx.select({ status: emailCampaigns.status }).from(emailCampaigns)
+      .where(and(eq(emailCampaigns.id, campaignId), eq(emailCampaigns.ownerId, owner))).for("update");
+    if (!current || !["DRAFT", "READY"].includes(current.status)) return false;
     await tx.delete(emailCampaignRecipients).where(eq(emailCampaignRecipients.campaignId, campaignId));
     // Inserts em blocos evitam uma query com milhares de parâmetros para bases grandes.
     for (let offset = 0; offset < recipients.length; offset += 250) {
@@ -93,9 +101,13 @@ export async function POST(...[, context]: [NextRequest, { params: Promise<{ id:
       sent: 0,
       failed: 0,
       skipped: rows.length - recipients.length,
+      audienceWithoutEmail: withoutEmail,
+      audienceInvalidEmail: invalidEmail,
       updatedAt: now,
     }).where(and(eq(emailCampaigns.id, campaignId), eq(emailCampaigns.ownerId, owner)));
+    return true;
   });
+  if (!prepared) return NextResponse.json({ error: "A campanha mudou de estado durante a preparação. Atualize a tela." }, { status: 409 });
 
   return NextResponse.json({
     campaignId,
@@ -103,6 +115,8 @@ export async function POST(...[, context]: [NextRequest, { params: Promise<{ id:
     eligible: recipients.length,
     pending: recipients.length,
     skipped: rows.length - recipients.length,
+    withoutEmail,
+    invalidEmail,
     status: "READY",
   });
 }

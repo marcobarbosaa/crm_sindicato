@@ -7,7 +7,10 @@ const require=createRequire(import.meta.url);
 // Resolve the runtime used by this project's Wrangler, not another global version.
 const {Miniflare,NoOpLog}=require(require.resolve('miniflare',{paths:[require.resolve('wrangler/package.json')]}));
 const compile=path=>ts.transpileModule(readFileSync(new URL('../'+path,import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
-const source=compile('lib/send-diagnostics.ts')+'\n'+compile('lib/attachment-storage.ts').replace(/^import .*from "\.\/send-diagnostics";\r?\n/m,'')+'\n'+compile('lib/gmail.ts');
+// Concatenated library modules are not Worker entrypoint exports. In particular,
+// constants must not be interpreted by workerd as named service entrypoints.
+const source=['lib/send-diagnostics.ts','lib/attachment-storage.ts','lib/gmail.ts','lib/delivery-policy.ts','lib/delivery-parser.ts','lib/gmail-delivery-client.ts']
+  .map(path=>compile(path).replace(/^import .*from "\.\/[^"\r\n]+";\r?\n/gm,'').replace(/^export /gm,'')).join('\n');
 
 test('workerd: actual storage and OAuth implementations work and never follow credential redirects',async()=>{
  const pending=[];
@@ -33,6 +36,7 @@ export default {async fetch(request){
    catch(error){return Response.json({legacyAccepted:false,code:runtimeFailure(error)?.code});}
   }
   if(op==='/oauth'){await refreshAccessToken('private-refresh-token');return Response.json({refreshed:true});}
+  if(op==='/delivery-list'){return Response.json(await listDeliveryCandidates('private-access-token',0,10000));}
   if(op==='/put'){await attachmentStorage().put('file',new Blob(['ok']));return Response.json({stored:true});}
   if(op==='/remove'){await attachmentStorage().remove('file');return Response.json({removed:true});}
   const bytes=await attachmentStorage().get('file');return Response.json({size:bytes.byteLength});
@@ -57,6 +61,12 @@ export default {async fetch(request){
   for(const status of [302,307]){
    reply('https://oauth2.googleapis.com','/token',status,'','POST');
    assert.deepEqual(await call('/oauth'),{code:'GMAIL_OAUTH_CONFIGURATION',providerStatus:status});
+  }
+  reply('https://gmail.googleapis.com','/gmail/v1/users/me/messages',200,JSON.stringify({messages:[{id:'bounce1'}]}));
+  assert.deepEqual(await call('/delivery-list'),{ids:['bounce1'],nextPageToken:null});
+  for(const [status,code] of [[302,'GMAIL_READ_FAILED'],[429,'GMAIL_RATE_LIMIT'],[500,'GMAIL_UNAVAILABLE'],[401,'GMAIL_REAUTH_REQUIRED'],[403,'GMAIL_READ_FORBIDDEN']]){
+   reply('https://gmail.googleapis.com','/gmail/v1/users/me/messages',status);
+   assert.equal((await call('/delivery-list')).code,code);
   }
   assert.equal(leaked,0,'No Authorization, apikey or OAuth POST body reaches a redirect destination');
   assert.equal(pending.length,0);

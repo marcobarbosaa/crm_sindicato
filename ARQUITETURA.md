@@ -1,5 +1,17 @@
 # Arquitetura do CRM Prospecta
 
+## Monitoramento de devoluções Gmail
+
+O runtime atual é Vinext/Cloudflare Worker com Drizzle e PostgreSQL no Supabase (`db/index.ts`). O envio em lote mantém seus leases por proprietário/campanha, barreira de envio, retries e sincronização de contadores. Após `COMPLETED`, `lib/gmail-delivery.ts` reconcilia devoluções em um cron independente, sem chamar o runner nem mudar `SENT`/`UNCERTAIN`.
+
+`lib/delivery-parser.ts` interpreta DSN MIME limitado; `lib/delivery-policy.ts` concentra classificação e sanitização puras; `lib/gmail-delivery-client.ts` contém somente chamadas de leitura ao Google com timeout, streaming limitado e redirects desabilitados. A autorização acrescenta `gmail.readonly` sem substituir `gmail.send`; criptografia AES-GCM continua em `lib/gmail.ts`.
+
+`email_delivery_events` é a auditoria idempotente vinculada à mensagem enviada, destinatário e campanha. `gmail_delivery_sync_state` armazena paginação e lease por conta/campanha. O resultado de entrega no destinatário é separado do estado de envio. A alteração mínima no runner gera/persiste o Message-ID RFC e a conta remetente para correlação segura.
+
+`GET /api/email-campaigns/:id/delivery` verifica campanha/proprietário e retorna relatório paginado ou CSV seguro. O componente `CampaignDelivery` integra o monitor existente. `PATCH /api/companies/:id/email-status` permite revisão manual com comparação do endereço atual. Um trigger PostgreSQL reseta o status quando o endereço muda, inclusive por importação. Preview/prepare compartilham a seleção do destinatário e separam ausentes de inválidos conhecidos.
+
+Consulte [decisões, limites operacionais e testes](docs/gmail-delivery-monitoring.md). As seções abaixo preservam o histórico do primeiro recorte; a descrição de infraestrutura nesta seção representa o runtime atual.
+
 ## 1. Objetivo do primeiro recorte
 
 Entregar uma base executável antes dos módulos complexos. A versão atual implementa dashboard, cadastro, busca, edição e exclusão de empresas, múltiplos contatos, timeline automática e persistência relacional.

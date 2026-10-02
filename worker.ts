@@ -17,6 +17,10 @@ export default {
           const due = await findDueCampaigns(1);
           for (const campaign of due) await processCampaignBatch(campaign.ownerId, Number(campaign.id));
           console.info({ ...event, status: "completed", campaignsChecked: due.length, durationMs: Date.now() - startedAt });
+        } else if (controller.cron === "*/2 * * * *") {
+          const { processPendingDeliveryChecks } = await import("./lib/gmail-delivery");
+          const delivery = await processPendingDeliveryChecks();
+          console.info({ ...event, status: "completed", ...delivery, durationMs: Date.now() - startedAt });
         } else {
           const { cleanupAttachments } = await import("./lib/attachment-service");
           const cleanup = await cleanupAttachments();

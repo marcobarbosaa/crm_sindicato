@@ -64,6 +64,7 @@ export async function GET(request: NextRequest) {
     Number.isInteger(region) && region >= 1 && region <= 17 ? eq(companies.region, region) : undefined,
     city ? eq(companies.city, city) : undefined,
     presenceFilter(companies.primaryEmail, email),
+    email === "invalid" ? eq(companies.primaryEmailStatus, "INVALID") : undefined,
     presenceFilter(companies.phone, phone),
     presenceFilter(companies.mobile, mobile),
     companySize && companySize !== "all" ? eq(companies.companySize, companySize) : undefined,

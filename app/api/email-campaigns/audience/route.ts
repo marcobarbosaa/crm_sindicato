@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, count, eq, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/db";
 import { companies, contacts } from "@/db/schema";
+import { audienceKnownInvalid, audienceRecipient, primaryContactId } from "@/lib/campaign-audience";
 
 const ownerId = () => "local-preview-user";
 
@@ -32,22 +33,16 @@ export async function GET(request: NextRequest) {
 
   // Um contato primário com e-mail válido tem precedência sobre o e-mail principal da empresa,
   // seguindo a mesma regra do envio legado. A expressão evita carregar o público no navegador.
-  const [{ eligible }] = await db
-    .select({ eligible: sql<number>`count(distinct ${companies.id})` })
+  const [{ eligible, invalidEmail, withoutEmail }] = await db
+    .select({ eligible: sql<number>`count(*) filter (where ${audienceRecipient} is not null and not ${audienceKnownInvalid})`,
+      invalidEmail: sql<number>`count(*) filter (where ${audienceRecipient} is not null and ${audienceKnownInvalid})`,
+      withoutEmail: sql<number>`count(*) filter (where ${audienceRecipient} is null)` })
     .from(companies)
     .leftJoin(
       contacts,
-      and(eq(contacts.companyId, companies.id), eq(contacts.isPrimary, true)),
+      and(eq(contacts.companyId, companies.id), eq(contacts.id, primaryContactId)),
     )
-    .where(
-      and(
-        condition,
-        or(
-          and(isNotNull(contacts.email), ne(contacts.email, "")),
-          and(isNotNull(companies.primaryEmail), ne(companies.primaryEmail, "")),
-        ),
-      ),
-    );
+    .where(condition);
 
   const totalNumber = Number(total || 0);
   const eligibleNumber = Number(eligible || 0);
@@ -55,7 +50,8 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     total: totalNumber,
     eligible: eligibleNumber,
-    withoutEmail: Math.max(0, totalNumber - eligibleNumber),
+    withoutEmail: Number(withoutEmail || 0),
+    invalidEmail: Number(invalidEmail || 0),
     filters: {
       region: validRegion(region) ? region : null,
       city: city || null,

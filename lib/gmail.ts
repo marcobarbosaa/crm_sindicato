@@ -1,6 +1,11 @@
 type RuntimeEnv = { GOOGLE_CLIENT_ID?:string; GOOGLE_CLIENT_SECRET?:string; TOKEN_ENCRYPTION_KEY?:string; APP_URL?:string; NEXT_PUBLIC_APP_URL?:string; SITE_URL?:string; NEXT_PUBLIC_SITE_URL?:string };
 const runtime = () => process.env as RuntimeEnv;
 
+export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+export const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+export const GMAIL_OAUTH_SCOPES = `openid email ${GMAIL_SEND_SCOPE} ${GMAIL_READ_SCOPE}`;
+export const hasDeliveryScope = (scopes: string) => scopes.split(/\s+/).includes(GMAIL_READ_SCOPE);
+
 export const appBaseUrl = (requestUrl?: string) => {
   const configured = runtime().APP_URL || runtime().NEXT_PUBLIC_APP_URL || runtime().SITE_URL || runtime().NEXT_PUBLIC_SITE_URL || "";
   if (configured) return configured.replace(/\/$/, "");
@@ -76,11 +81,15 @@ function filenameParameters(name:string) {
   if(chunk)chunks.push(chunk);
   return chunks.map((part,i)=>"filename*"+i+"*="+(i===0?"UTF-8''":"")+part).join(";\r\n ");
 }
-export function encodeRawEmail({from,to,subject,body,attachments=[]}:{from:string;to:string;subject:string;body:string;attachments?:EmailAttachment[]}) {
+export function encodeRawEmail({from,to,subject,body,attachments=[],messageId}:{from:string;to:string;subject:string;body:string;attachments?:EmailAttachment[];messageId?:string}) {
   const safeFrom=from.replace(/[\r\n]/g," ").trim(),safeTo=to.replace(/[\r\n]/g,"").trim(),safeSubject=subject.replace(/[\r\n]+/g," ").trim();
   const mailbox=safeFrom.match(/^(.*?)\s*<([^<>]+)>$/);
   const fromHeader=mailbox?encodedWords(mailbox[1])+" <"+mailbox[2]+">":safeFrom;
   const headers=["From: "+fromHeader,"To: "+safeTo,"Subject: "+encodedWords(safeSubject),"MIME-Version: 1.0"];
+  if (messageId) {
+    if (!/^<[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+>$/.test(messageId)) throw new Error("Message-ID inválido.");
+    headers.push("Message-ID: " + messageId);
+  }
   const textPart=['Content-Type: text/plain; charset="UTF-8"',"Content-Transfer-Encoding: base64","",foldedBase64(new TextEncoder().encode(body))].join("\r\n");
   if(!attachments.length)return Buffer.from([...headers,textPart].join("\r\n"),"utf8").toString("base64url");
   const boundary="crm_"+crypto.randomUUID().replace(/-/g,"");

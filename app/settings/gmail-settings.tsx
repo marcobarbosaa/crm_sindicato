@@ -12,6 +12,7 @@ const scopeLabels: Record<string, string> = {
   email: "Consultar seu endereço de e-mail",
   "https://www.googleapis.com/auth/userinfo.email": "Consultar seu endereço de e-mail",
   "https://www.googleapis.com/auth/gmail.send": "Enviar e-mails em seu nome",
+  "https://www.googleapis.com/auth/gmail.readonly": "Ler notificações de falha de entrega (acesso de leitura ao Gmail)",
 };
 export function GmailSettings({ gmail, onDisconnected, onSent, canLeave }: { gmail: GmailStatus; onDisconnected: () => void; onSent: () => void; canLeave: () => boolean }) {
   const [busy, setBusy] = useState(false);
@@ -46,6 +47,7 @@ export function GmailSettings({ gmail, onDisconnected, onSent, canLeave }: { gma
       <div className="preferences-account"><span className="preferences-icon"><Mail /></span><div><strong>{gmail.account?.email || "Nenhuma conta conectada"}</strong><span className={"preferences-badge " + (gmail.connected ? "connected" : "warning")}>{gmail.connected ? "Conectada" : gmail.needsReconnect ? "Reconexão necessária" : "Não conectada"}</span></div></div>
       {gmail.account ? <p>Conectada em {formatDate(gmail.account.connectedAt)}. A autorização será validada pelo Google ao enviar.</p> : <p>Conecte uma conta Google para enviar e-mails pelo CRM.</p>}
       {!gmail.configured && <p className="preferences-note warning">A integração Google ainda precisa ser configurada no ambiente do CRM.</p>}
+      {gmail.needsReconnect && <p className="preferences-note warning">Reconecte o Gmail para autorizar a leitura das notificações de falha. A análise de entrega precisa dessa permissão; nenhuma mensagem será apagada ou modificada.</p>}
       <div className="preferences-actions">
         <Button asChild disabled={!gmail.configured || busy || sending}><a href={gmail.configured && !busy && !sending ? "/api/gmail/connect" : undefined} aria-disabled={!gmail.configured || busy || sending} onClick={event => { if (!gmail.configured || busy || sending || !canLeave()) event.preventDefault(); }}><RefreshCw />{gmail.account ? "Reconectar Gmail" : "Conectar Gmail"}</a></Button>
         {gmail.account && <Button variant="outline" className="preferences-danger" disabled={busy || sending} onClick={disconnect}><Unplug />{busy ? "Desconectando…" : "Desconectar"}</Button>}

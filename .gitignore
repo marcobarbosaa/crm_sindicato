@@ -50,4 +50,5 @@ next-env.d.ts
 
 # relatórios
 
-/docs/
+/docs/*
+!/docs/gmail-delivery-monitoring.md

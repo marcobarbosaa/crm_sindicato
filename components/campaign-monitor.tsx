@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { CampaignCountdown, useCampaignClock } from "@/components/campaign-countdown";
 import type { CampaignMonitoring } from "@/lib/campaign-monitoring";
+import { CampaignDelivery } from "@/components/campaign-delivery";
 
 export type CampaignMonitorData = {
   id: number; name: string; status: string; total?: number; pending?: number; sent?: number;
   failed?: number; skipped?: number; batchSize?: number; intervalMinutes?: number;
+  audienceWithoutEmail?: number; audienceInvalidEmail?: number;
   logicalBatch?: { id: string; recipientIds: number[]; startedAt: number } | null;
   processingNotice?: string | null;
   nextRunAt?: string | null; startedAt?: string | null; lockUntil?: string | null;
@@ -169,6 +171,7 @@ export function CampaignMonitor({ initialCampaign }: { initialCampaign: Campaign
   return <div className="campaign-monitor">
     <div className="cm-page-intro"><h2>Envio em lote</h2><p>Acompanhe o processamento da campanha e o resultado de cada envio.</p></div>
     <CampaignHeader campaign={campaign} reviewRequired={reviewRequired} timezone={timezone} />
+    {!!((campaign.audienceWithoutEmail || 0) + (campaign.audienceInvalidEmail || 0)) && <p className="cm-notice">Excluídas na preparação: {campaign.audienceWithoutEmail || 0} sem e-mail · {campaign.audienceInvalidEmail || 0} com e-mail inválido conhecido.</p>}
     {campaign.processingNotice && <p className="cm-notice" role="status"><Clock3 />{campaign.processingNotice}</p>}
     {(syncError || reviewError) && <p className="cm-notice" role="status"><AlertTriangle />Não foi possível atualizar agora. Tentaremos novamente.{reviewError && " A lista de revisão não pôde ser sincronizada."}</p>}
     {processError && running && <p className="cm-notice" role="alert"><AlertTriangle />{processError} O processamento será verificado novamente.</p>}
@@ -223,6 +226,7 @@ export function CampaignMonitor({ initialCampaign }: { initialCampaign: Campaign
       </ol>
       <p className="cm-footnote">O histórico individual de lotes não está disponível para esta campanha. Acompanhe abaixo os registros reais dos destinatários.</p>
     </section>
+    <CampaignDelivery campaignId={campaign.id} />
     <section className="cm-card cm-activity" aria-labelledby="cm-activity-title">
       <div className="cm-section-heading"><span className="cm-icon"><Clock3 aria-hidden="true" /></span><div><h2 id="cm-activity-title">Atividade dos destinatários</h2><p>Últimas atualizações registradas · até 8 destinatários</p></div><span className="cm-subtle">Horários{timezone ? ` · ${timezone}` : ""}</span></div>
       {!monitoring ? <p className="cm-empty">Aguardando os registros da campanha…</p> : monitoring.activities.length === 0 ? <p className="cm-empty">Nenhuma atividade de destinatário registrada ainda.</p>

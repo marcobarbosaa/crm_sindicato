@@ -5,10 +5,11 @@ import ts from "typescript";
 const compiled = ts.transpileModule(readFileSync(new URL('../worker.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
 }).outputText;
-function loadWorker({ fetch, cleanup, findDue, processCampaign } = {}) {
+function loadWorker({ fetch, cleanup, findDue, processCampaign, delivery } = {}) {
   const logs = [], loadedModule = { exports: {} };
   const require = name => {
     if (name === 'vinext/server/fetch-handler') return { fetch };
+    if (name === './lib/gmail-delivery') return { processPendingDeliveryChecks: delivery };
     if (name === './db') return { withCampaignDb: fn => fn() };
     if (name === './lib/attachment-service') return { cleanupAttachments: cleanup };
     if (name === './lib/campaign-runner') return { findDueCampaigns: findDue, processCampaignBatch: processCampaign };
@@ -52,4 +53,9 @@ test('partial cleanup fails the event and does not retry in a loop', async () =>
 test('empty campaign schedule does not send or clean attachments', async () => {
   const { worker } = loadWorker({ findDue: async () => [], cleanup: () => assert.fail(), processCampaign: () => assert.fail() });
   await worker.scheduled({ ...event, cron: '* * * * *' });
+});
+
+test('delivery cron has its own bounded invocation and never sends or cleans attachments', async () => {
+ let calls=0; const {worker}=loadWorker({delivery:async()=>{calls++;return {outcome:'checked'}},findDue:()=>assert.fail('must not send'),cleanup:()=>assert.fail('must not mix budgets')});
+ await worker.scheduled({...event,cron:'*/2 * * * *'}); assert.equal(calls,1);
 });

@@ -16,7 +16,7 @@ const STATUS_LABELS: Record<string, string> = {
   RUNNING: "Em execucao",
 };
 
-export function CampaignHistory() {
+export function CampaignHistory({ onOpen }: { onOpen?: (campaign: CampaignMonitorData) => void }) {
   const [campaigns, setCampaigns] = useState<CampaignMonitorData[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
@@ -91,6 +91,7 @@ export function CampaignHistory() {
             <span><Users />{campaign.skipped || 0} ignorados</span>
             <span><Ban />{campaign.failed || 0} falhas</span>
           </div>
+          {onOpen && <Button variant="outline" size="sm" onClick={() => onOpen(campaign)}>Ver relatório</Button>}
           {active ? <Button variant="destructive" size="sm" disabled={cancellingId === campaign.id} onClick={() => void cancel(campaign.id)}><Ban />{cancellingId === campaign.id ? "Cancelando..." : "Cancelar"}</Button> : <CheckCircle2 className="campaign-history-finished" />}
         </article>;
       })}

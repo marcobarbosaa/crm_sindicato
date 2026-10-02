@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activityLogs, emailAccounts, oauthStates } from "@/db/schema";
-import { GmailOAuthError, encryptNewRefreshToken, googleClientId, googleClientSecret, googleRedirectUri } from "@/lib/gmail";
+import { GMAIL_READ_SCOPE, GmailOAuthError, encryptNewRefreshToken, googleClientId, googleClientSecret, googleRedirectUri } from "@/lib/gmail";
 
 const GMAIL_SEND_SCOPE="https://www.googleapis.com/auth/gmail.send";
 
@@ -20,7 +20,7 @@ export async function GET(request:NextRequest) {
     const tokenInfo=await tokenInfoResponse.json() as {scope?:string};
     if(!tokenInfoResponse.ok)throw new Error("Token verification failed");
     const grantedScopes=token.scope||tokenInfo.scope||"";
-    if(!new Set(grantedScopes.split(/\s+/).filter(Boolean)).has(GMAIL_SEND_SCOPE))return NextResponse.redirect(new URL("/?gmail=missing-scope",url.origin));
+    if(![GMAIL_SEND_SCOPE,GMAIL_READ_SCOPE].every(scope=>new Set(grantedScopes.split(/\s+/).filter(Boolean)).has(scope)))return NextResponse.redirect(new URL("/?gmail=missing-scope",url.origin));
     const userResponse=await fetch("https://openidconnect.googleapis.com/v1/userinfo",{redirect:"manual",signal:AbortSignal.timeout(30_000),headers:{authorization:`Bearer ${token.access_token}`}}); const user=await userResponse.json() as {email?:string}; if(!userResponse.ok||!user.email)throw new Error("Não foi possível identificar a conta Google.");
     const [existing]=await db.select().from(emailAccounts).where(and(eq(emailAccounts.ownerId,saved.ownerId),eq(emailAccounts.provider,"GMAIL"))).limit(1); const now=new Date();
     let encrypted:string;
