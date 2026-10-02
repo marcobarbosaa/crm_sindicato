@@ -1,3 +1,4 @@
+import { SendFailure, databaseFailure } from "./send-diagnostics";
 import { and, eq, inArray, isNull, lte, asc, notInArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { templateAttachments } from "@/db/schema";
@@ -43,7 +44,12 @@ export async function syncTemplateAttachments(tx: Transaction, owner: string, te
   return ids.map(id => attachmentMetadata(byId.get(id)!));
 }
 export async function loadSendAttachments(owner: string, value: unknown, templateId?: number) {
-  return getDb().transaction(async tx => {
+  // Explicitly empty selections must not allocate another database connection.
+  if (!(value === undefined && templateId)) {
+    const ids = attachmentIds(value ?? []);
+    if (!ids.length) return [];
+  }
+  try { return await getDb().transaction(async tx => {
     const ids = value === undefined && templateId
       ? (await tx.select({ id: templateAttachments.id }).from(templateAttachments).where(and(eq(templateAttachments.ownerId, owner), eq(templateAttachments.templateId, templateId)))).map(row => row.id)
       : attachmentIds(value ?? []);
@@ -57,7 +63,10 @@ export async function loadSendAttachments(owner: string, value: unknown, templat
       result.push({ ...attachmentMetadata(row), content });
     }
     return result;
-  });
+  }); } catch (error) {
+    if (error instanceof AttachmentError || error instanceof SendFailure) throw error;
+    throw databaseFailure(error);
+  }
 }
 export async function cleanupAttachments() {
   const storage = attachmentStorage();

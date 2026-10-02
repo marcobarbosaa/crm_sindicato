@@ -47,3 +47,7 @@ next-env.d.ts
 /.agents/
 /outputs/
 /work/
+
+# relatórios
+
+/docs/

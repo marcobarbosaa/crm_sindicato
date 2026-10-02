@@ -17,7 +17,7 @@ test('OAuth invalid_grant reports reconnection without exposing provider text',a
  });
 });
 test('OAuth success returns token with redirects disabled',async()=>{
- const {refreshAccessToken}=load(async(url,init)=>{assert.equal(url,'https://oauth2.googleapis.com/token');assert.equal(init.redirect,'error');assert.equal(init.body.get('grant_type'),'refresh_token');return response(200,{access_token:'access'});});
+ const {refreshAccessToken}=load(async(url,init)=>{assert.equal(url,'https://oauth2.googleapis.com/token');assert.equal(init.redirect,'manual');assert.equal(init.body.get('grant_type'),'refresh_token');return response(200,{access_token:'access'});});
  assert.equal(await refreshAccessToken('refresh'),'access');
 });
 test('OAuth invalid_client is configuration failure',async()=>{
@@ -43,4 +43,9 @@ test('missing configuration fails before network',async()=>{
 test('missing access token on success cannot be mistaken for valid authorization',async()=>{
  const {refreshAccessToken}=load(async()=>response(200,{access_token:123}));
  await assert.rejects(refreshAccessToken('refresh'),e=>e.code==='GMAIL_OAUTH_UNAVAILABLE');
+});
+
+test('OAuth rejects redirects without parsing provider content',async()=>{
+ const {refreshAccessToken}=load(async()=>({ok:false,status:302,json:()=>assert.fail('redirect body must not be read')}));
+ await assert.rejects(refreshAccessToken('private-refresh-token'),e=>e.oauthCode==='redirect_not_allowed'&&e.code==='GMAIL_OAUTH_CONFIGURATION');
 });

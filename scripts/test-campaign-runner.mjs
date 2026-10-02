@@ -276,7 +276,9 @@ test('expired Gmail authorization pauses before sending and logs the precise saf
   assert.equal(log.category, 'AUTHENTICATION_FAILURE'); assert.equal(JSON.stringify(f.logs).includes('secret'), false);
   assert.equal((await f.run()).locked, true);
   const batchId = f.campaign.logicalBatch.id;
-  delete options.oauthFailure; await f.control('resume'); f.advance(60000); await f.run();
+  assert.equal(f.state.emailAccounts[0].needsReconnect, true);
+  delete options.oauthFailure; f.state.emailAccounts[0].needsReconnect = false; // Successful OAuth callback replaces authorization.
+  await f.control('resume'); f.advance(60000); await f.run();
   assert.equal(f.calls.length, 5); assert.equal(f.campaign.logicalBatch.id, batchId); assert.equal(f.campaign.processingNotice, null); f.sentExactlyOnce();
 });
 test('temporary OAuth failure keeps recipients eligible and uses a delayed retry', async () => {
@@ -294,4 +296,14 @@ test('invalid OAuth client shows a configuration notice rather than retrying for
 test('attachment failures are identified separately from OAuth and finalization', async () => {
   const f = fixture(1, { attachmentError: true }); await f.run();
   assert.equal(f.logs.find(l => l.event === 'campaign.chunk').stage, 'attachments'); assert.equal(f.refreshes, 0);
+});
+
+test('legacy database CHECK rejects PREPARED before Gmail and reports SQLSTATE in chunk summary',async()=>{
+ const f=fixture(1,{beforeQuery(q){if(q.kind==='insert'&&q.table.table==='emailMessages'&&q.data.status==='PREPARED')throw new Error('private SQL and recipient',{cause:Object.assign(new Error('private failing row'),{code:'23514'})});}});
+ const result=await f.run();
+ assert.equal(result.deferred,1);assert.equal(f.calls.length,0);assert.equal(f.refreshes,1);
+ assert.equal(f.recipients[0].status,'PENDING');assert.equal(f.recipients[0].attempts,0);assert.equal(f.state.emailMessages.length,0);
+ assert.deepEqual(result.deferredReason,{stage:'prepare',category:'INFRASTRUCTURE_FAILURE',causeCategory:'DATABASE_FAILURE',errorCode:'23514'});
+ const summary=f.logs.find(l=>l.event==='campaign.chunk'&&l.deferred===1);
+ assert.deepEqual(summary.deferredReason,result.deferredReason);assert.equal(JSON.stringify(f.logs).includes('private'),false);
 });

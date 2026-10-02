@@ -26,7 +26,7 @@ export async function decryptToken(value:string) {
   return new TextDecoder().decode(decrypted);
 }
 
-const OAUTH_CODES = ["invalid_grant", "invalid_client", "unauthorized_client", "invalid_request", "access_denied", "temporarily_unavailable", "server_error", "missing_configuration"];
+const OAUTH_CODES = ["invalid_grant", "invalid_client", "unauthorized_client", "invalid_request", "access_denied", "temporarily_unavailable", "server_error", "missing_configuration", "missing_refresh_token", "redirect_not_allowed"];
 
 // Never expose Google's free-form error_description: it is untrusted text.
 export class GmailOAuthError extends Error {
@@ -36,8 +36,8 @@ export class GmailOAuthError extends Error {
   readonly requiresUserAction: boolean;
   constructor(readonly httpStatus: number, oauthCode: unknown) {
     const normalized = typeof oauthCode === "string" && OAUTH_CODES.includes(oauthCode) ? oauthCode : "unknown_error";
-    const reconnect = normalized === "invalid_grant" || normalized === "access_denied";
-    const configuration = ["invalid_client", "unauthorized_client", "invalid_request", "missing_configuration"].includes(normalized);
+    const reconnect = normalized === "invalid_grant" || normalized === "access_denied" || normalized === "missing_refresh_token";
+    const configuration = ["invalid_client", "unauthorized_client", "invalid_request", "missing_configuration", "redirect_not_allowed"].includes(normalized);
     super(reconnect
       ? "A autorização do Gmail expirou ou foi revogada. Reconecte a conta em Configurações → Gmail e depois retome a campanha."
       : configuration
@@ -53,7 +53,8 @@ export class GmailOAuthError extends Error {
 
 export async function refreshAccessToken(refreshToken:string) {
   if (!googleClientId() || !googleClientSecret()) throw new GmailOAuthError(0, "missing_configuration");
-  const response = await fetch("https://oauth2.googleapis.com/token", { method:"POST", headers:{"content-type":"application/x-www-form-urlencoded"}, redirect:"error", signal:AbortSignal.timeout(30_000), body:new URLSearchParams({ client_id:googleClientId(), client_secret:googleClientSecret(), refresh_token:refreshToken, grant_type:"refresh_token" }) });
+  const response = await fetch("https://oauth2.googleapis.com/token", { method:"POST", headers:{"content-type":"application/x-www-form-urlencoded"}, redirect:"manual", signal:AbortSignal.timeout(30_000), body:new URLSearchParams({ client_id:googleClientId(), client_secret:googleClientSecret(), refresh_token:refreshToken, grant_type:"refresh_token" }) }).catch(() => { throw new GmailOAuthError(0, "temporarily_unavailable"); });
+  if (response.status >= 300 && response.status < 400) throw new GmailOAuthError(response.status, "redirect_not_allowed");
   const data = await response.json().catch(() => null) as { access_token?: unknown; error?: unknown } | null;
   if (!response.ok || typeof data?.access_token !== "string" || !data.access_token) throw new GmailOAuthError(response.status, data?.error);
   return data.access_token;
@@ -96,3 +97,10 @@ function bytesToBase64(bytes:Uint8Array) { return Buffer.from(bytes).toString("b
 function toBase64Url(bytes:Uint8Array) { return bytesToBase64(bytes).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,""); }
 function fromBase64Url(value:string) { const base64=value.replace(/-/g,"+").replace(/_/g,"/").padEnd(Math.ceil(value.length/4)*4,"="); const binary=atob(base64); return Uint8Array.from(binary,c=>c.charCodeAt(0)); }
 async function encryptionKey() { const secret=runtime().TOKEN_ENCRYPTION_KEY; if(!secret)throw new Error("Chave de criptografia ausente."); const raw=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(secret)); return crypto.subtle.importKey("raw",raw,"AES-GCM",false,["encrypt","decrypt"]); }
+
+// A reconnect must replace authorization; never resurrect a stored invalid token.
+export async function encryptNewRefreshToken(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) throw new GmailOAuthError(0, "missing_refresh_token");
+  await refreshAccessToken(value);
+  return encryptToken(value);
+}

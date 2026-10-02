@@ -1,3 +1,4 @@
+import { SendFailure, databaseFailure, runtimeFailure } from "@/lib/send-diagnostics";
 ﻿import { dailyCampaignUsage } from "@/lib/campaign-quota";
 import { sendingDayWindow } from "@/lib/settings";
 import { and, asc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
@@ -122,6 +123,8 @@ async function processChunk(ownerId: string, campaignId: number) {
   const { campaign, token } = claim, chunkId = crypto.randomUUID(), deadline = Date.now() + CHUNK_DEADLINE_MS;
   let logicalBatch = campaign.logicalBatch, sent = 0, failed = 0, skipped = 0, retried = 0, deferred = 0;
   let stage = "reconcile";
+  let deferredReason:{stage:string;category:string;causeCategory:string;errorCode:string}|undefined;
+  let oauthAccount:typeof emailAccounts.$inferSelect|undefined;
   const finalize = (dailyWindow?: Date) => {
     stage = "finalize";
     return finishChunk(campaign, logicalBatch, dailyWindow);
@@ -148,7 +151,9 @@ async function processChunk(ownerId: string, campaignId: number) {
     stage = "attachments";
     const attachments = await loadSendAttachments(ownerId, undefined, template.id);
     const metadata = attachments.map(({ id, name, mimeType, size }) => ({ id, name, mimeType, size }));
+    oauthAccount = account;
     stage = "oauth-decrypt";
+    if (account.needsReconnect) throw new GmailOAuthError(0, "invalid_grant");
     const refreshToken = await decryptToken(account.encryptedRefreshToken);
     stage = "oauth-refresh";
     const accessToken = await refreshAccessToken(refreshToken);
@@ -210,7 +215,7 @@ async function processChunk(ownerId: string, campaignId: number) {
         if (Date.now() >= deadline) throw new Error("Send deferred before fetch");
         sendStarted = true;
         stage = "gmail-fetch";
-        const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", { method: "POST", redirect: "error",
+        const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", { method: "POST", redirect: "manual",
           headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify({ raw }), signal: AbortSignal.timeout(30_000) });
         // A confirmed non-2xx is a provider rejection, even with a non-JSON body.
         const result = await response.json().catch(() => null) as { id?: string; error?: { message?: string; errors?: { reason?: string }[] } } | null;
@@ -240,8 +245,12 @@ async function processChunk(ownerId: string, campaignId: number) {
         sent++;
       } catch (error) {
         const category = classifyRuntimeFailure(sendStarted), exhausted = isSubrequestLimit(error);
+        const diagnostic = error instanceof SendFailure ? error : runtimeFailure(error) ||
+          (["control", "duplicate", "prepare", "send-barrier", "persist-sent", "provider-rejection"].includes(stage)
+            ? databaseFailure(error) : new SendFailure("RUNTIME_FAILURE", "CAMPAIGN_RUNTIME_FAILURE"));
+        deferredReason = { stage, category, causeCategory: diagnostic.category, errorCode: diagnostic.code };
         console.error({ event: "campaign.recipient", campaignId, recipientId: target.id, batchId: logicalBatch?.id, chunkId,
-          attempt: (claimedTarget?.attempts ?? target.attempts) + Number(sendStarted), stage, category, infrastructureLimit: exhausted });
+          attempt: (claimedTarget?.attempts ?? target.attempts) + Number(sendStarted), stage, category, causeCategory: diagnostic.category, errorCode: diagnostic.code, infrastructureLimit: exhausted });
         // Best effort only. If the invocation cannot do ANY more I/O, the lease
         // expires and the durable PREPARED/SENDING barrier drives recovery.
         try {
@@ -265,10 +274,13 @@ async function processChunk(ownerId: string, campaignId: number) {
         break;
       }
     }
-    console.info({ event: "campaign.chunk", campaignId, batchId: logicalBatch?.id, chunkId, sent, failed, skipped, retried, deferred });
-    return { processed: sent + failed + skipped + retried, sent, failed, skipped, retried, deferred, ...await finalize() };
+    console.info({ event: "campaign.chunk", campaignId, batchId: logicalBatch?.id, chunkId, sent, failed, skipped, retried, deferred, ...(deferredReason ? { deferredReason } : {}) });
+    return { processed: sent + failed + skipped + retried, sent, failed, skipped, retried, deferred, ...(deferredReason ? { deferredReason } : {}), ...await finalize() };
   } catch (error) {
     const oauth = error instanceof GmailOAuthError ? error : null;
+    if (oauth?.requiresReconnect && oauthAccount) {
+      try { await db.update(emailAccounts).set({ needsReconnect: true }).where(and(eq(emailAccounts.ownerId, ownerId), eq(emailAccounts.provider, "GMAIL"), eq(emailAccounts.encryptedRefreshToken, oauthAccount.encryptedRefreshToken))); } catch { /* Existing OAuth failure still pauses the campaign. */ }
+    }
     const needsUserAction = oauth?.requiresUserAction || false;
     const notice = oauth?.message || INFRASTRUCTURE_NOTICE;
     console.error({ event: "campaign.chunk", campaignId, batchId: logicalBatch?.id, chunkId, stage,

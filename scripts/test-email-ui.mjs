@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve, join } from "node:path";
 import assert from "node:assert/strict";
 
 const output=resolve("outputs/attachments-qa");mkdirSync(output,{recursive:true});
-const browser=spawn(process.env.CHROME_BINARY||"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",["--headless=new","--disable-gpu","--no-first-run","--no-default-browser-check","--remote-debugging-port=9333","--user-data-dir="+resolve(output,"browser-profile"),"about:blank"],{windowsHide:true,stdio:"ignore"});
+const browser=spawn(process.env.CHROME_BINARY||"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",["--headless=new","--disable-gpu","--no-first-run","--no-default-browser-check","--remote-debugging-port=9333","--user-data-dir="+mkdtempSync(join(tmpdir(),"crm-email-qa-")),"about:blank"],{windowsHide:true,stdio:"ignore"});
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 let socket,seq=0;
 const pending=new Map(),requests=[],errors=[];
@@ -62,8 +63,9 @@ try{
   socket.addEventListener("message",event=>{const m=JSON.parse(event.data);if(m.id){const p=pending.get(m.id);pending.delete(m.id);if(m.error)p?.reject(new Error(JSON.stringify(m.error)));else p?.resolve(m.result);}else if(m.method==="Fetch.requestPaused")void mock(m.params).catch(e=>errors.push(String(e)));else if(m.method==="Runtime.exceptionThrown")errors.push(JSON.stringify(m.params.exceptionDetails));});
   await send("Page.enable");await send("Page.bringToFront");await send("Emulation.setFocusEmulationEnabled",{enabled:true});await send("Runtime.enable");await send("Fetch.enable",{patterns:[{urlPattern:"*/api/*",requestStage:"Request"}]});
   await send("Emulation.setDeviceMetricsOverride",{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
-  await send("Page.navigate",{url:"http://localhost:5174/workspace"});
+  await send("Page.navigate",{url:(process.env.EMAIL_TEST_URL||"http://localhost:5173")+"/workspace"});
   await waitFor("!!document.querySelector('nav[aria-label=\"Navegação principal\"]')");
+  await waitFor("document.querySelector('.sidebar-help')?.getAttribute('role') === 'button'");
   await clickText("Templates");
   await waitFor("!!document.querySelector('#template-name') && !document.querySelector('#template-name').matches(':disabled')");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>/^(Novo template|Criar template)$/.test(b.textContent.trim()))"),false);
@@ -81,7 +83,12 @@ try{
   await clickText("Salvar");
   await waitFor("document.body.innerText.includes('Template salvo.')");
   assert.equal(templates[0].attachments.length,1);
-  await send("Page.reload");
+  const reloaded=new Promise(resolve=>{
+    const listener=event=>{if(JSON.parse(event.data).method==="Page.loadEventFired"){socket.removeEventListener("message",listener);resolve();}};
+    socket.addEventListener("message",listener);
+  });
+  await send("Page.reload");await reloaded;
+  await waitFor("document.querySelector('.sidebar-help')?.getAttribute('role') === 'button'");
   await waitFor("!!document.querySelector('nav[aria-label=\"Navegação principal\"]')");
   await clickText("Templates");
   await waitFor("!!document.querySelector('.template-items button')");
