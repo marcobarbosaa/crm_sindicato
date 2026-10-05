@@ -195,7 +195,6 @@ export function CrmApp() {
     window.addEventListener("popstate", pop);
     return () => window.removeEventListener("popstate", pop);
   }, [view, settingsDirty]);
-  const currentLabel = nav.find(([id]) => id === view)?.[1];
   return (
     <div className="app-shell">
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
@@ -230,6 +229,13 @@ export function CrmApp() {
             </button>
           ))}
         </nav>
+        {view !== "settings" && view !== "batch" && <div className="crm-sidebar-create" hidden={view === "companies"}>
+          <CompanyDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            onSaved={refreshCompanies}
+          />
+        </div>}
         <div className="sidebar-help">
           <CircleHelp />
           <div>
@@ -254,30 +260,15 @@ export function CrmApp() {
         />
       )}
       <main>
-        <header className={view === "settings" ? "topbar settings-topbar" : "topbar"}>
+        <div className="content">
           <button
-            className="menu-button"
+            className="menu-button crm-mobile-menu"
             onClick={() => setMenuOpen(true)}
             aria-label="Abrir menu"
           >
             <Menu />
+            <span>Menu</span>
           </button>
-          <div>
-            <span>Workspace</span>
-            <strong>{currentLabel}</strong>
-          </div>
-          {view !== "settings" && <div className="top-actions">
-            <button className="icon-button" aria-label="Ajuda">
-              <CircleHelp />
-            </button>
-            {view !== "batch" && <CompanyDialog
-              open={dialogOpen}
-              onOpenChange={setDialogOpen}
-              onSaved={refreshCompanies}
-            />}
-          </div>}
-        </header>
-        <div className="content">
           {view === "dashboard" ? (
             <Dashboard
               metrics={metrics}
