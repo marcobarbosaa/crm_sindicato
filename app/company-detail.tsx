@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  Calendar, Check, Clock3, Edit3, Mail, MessageCircle, MapPin, Phone, Plus, Star, Trash2, UserRound,
+  Building2, Clock3, Edit3, Mail, MessageCircle, MapPin, MoreHorizontal, Phone, Plus, Star, Trash2, UserRound,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,42 +12,297 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { formatCnpj, parseWorkforce } from "@/lib/company-size";
 import { deliveryLabels } from "@/lib/delivery-policy";
 import { formatBrazilianPhone } from "@/lib/phone";
 
-type Company={id:number;name:string;tradeName?:string|null;cnpj?:string|null;website?:string|null;primaryEmail?:string|null;primaryEmailStatus?:string;primaryEmailStatusReason?:string|null;segment?:string|null;region?:number|null;address?:string|null;city?:string|null;state?:string|null;phone?:string|null;phoneWhatsAppStatus?:"UNKNOWN"|"YES"|"NO";mobile?:string|null;mobileWhatsAppStatus?:"UNKNOWN"|"YES"|"NO";employeeCount?:number|null;employeeRange?:string|null;companySize?:string|null;notes?:string|null;status:string;createdAt:string;updatedAt:string};
-type Contact={id:number;name?:string|null;email?:string|null;phone?:string|null;role?:string|null;isPrimary:boolean;createdAt:string};
-type Activity={id:number;type:string;description:string;createdAt:string};
-type Detail={company:Company;contacts:Contact[];activities:Activity[]};
-const statuses=[["NOT_CONTACTED","Não contatada"],["CONTACTED","Contatada"],["WAITING_REPLY","Aguardando resposta"],["REPLIED","Respondeu"],["FOLLOW_UP","Follow-up"],["INTERESTED","Interessada"],["NOT_INTERESTED","Sem interesse"],["CLOSED","Cliente / encerrada"]] as const;
-
-export function CompanyDetail({companyId,onClose,onChanged}:{companyId:number|null;onClose:()=>void;onChanged:()=>void}){
- const[data,setData]=useState<Detail|null>(null),[loadingId,setLoadingId]=useState<number|null>(null),[saving,setSaving]=useState(false),[editingCompanyId,setEditingCompanyId]=useState<number|null>(null),[contactOpen,setContactOpen]=useState(false),[editingContact,setEditingContact]=useState<Contact|null>(null);
- const visibleData=data?.company.id===companyId?data:null;
- const loading=companyId!==null&&(loadingId===companyId||!visibleData);
- const editing=companyId!==null&&editingCompanyId===companyId;
- const load=useCallback(async()=>{if(!companyId)return;const requestedId=companyId;setLoadingId(requestedId);try{const r=await fetch(`/api/companies/${requestedId}`);if(!r.ok)throw new Error();const next=await r.json() as Detail;if(next.company.id===requestedId)setData(next)}catch{toast.error("Não foi possível abrir a empresa.");onClose()}finally{setLoadingId(current=>current===requestedId?null:current)}},[companyId,onClose]);
- useEffect(() => {
-   if (!companyId) return;
-
-   const timer = setTimeout(() => {
-     void load();
-   }, 0);
-
-   return () => clearTimeout(timer);
- }, [companyId, load]);
- async function saveCompany(e:React.FormEvent<HTMLFormElement>){e.preventDefault();if(!companyId)return;setSaving(true);const body=Object.fromEntries(new FormData(e.currentTarget));body.statusLabel=statuses.find(s=>s[0]===body.status)?.[1]||String(body.status);const r=await fetch(`/api/companies/${companyId}`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(body)});const result=await r.json() as {error?:string};setSaving(false);if(!r.ok)return toast.error(result.error||"Não foi possível salvar.");toast.success("Dados atualizados.");setEditingCompanyId(null);await load();onChanged()}
- async function deleteContact(contact:Contact){if(!companyId||!confirm(`Remover o contato ${contact.name||contact.email}?`))return;const r=await fetch(`/api/companies/${companyId}/contacts?contactId=${contact.id}`,{method:"DELETE"});if(r.ok){toast.success("Contato removido.");await load()}else toast.error("Não foi possível remover o contato.")}
- async function restoreEmailStatus(){if(!visibleData)return;setSaving(true);try{const r=await fetch(`/api/companies/${companyId}/email-status`,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({expectedEmail:visibleData.company.primaryEmail||""})});if(!r.ok)throw new Error();toast.success("Status do e-mail restaurado.");await load();onChanged()}catch{toast.error("N?o foi poss?vel restaurar o status. Atualize a empresa e tente novamente.")}finally{setSaving(false)}}
- return <Sheet open={companyId!==null} onOpenChange={open=>{if(!open){setEditingCompanyId(null);onClose()}}}><SheetContent className="company-sheet sm:max-w-[820px]" aria-describedby="company-detail-description"><SheetHeader className="detail-header"><SheetTitle>{loading?"Carregando empresa…":visibleData?.company.name||"Empresa"}</SheetTitle><SheetDescription id="company-detail-description">Dados, contatos e histórico da prospecção em um só lugar.</SheetDescription></SheetHeader>{loading?<div className="detail-loading"><Skeleton/><Skeleton/><Skeleton/></div>:visibleData?<div className="detail-scroll"><div className="company-summary"><div className="company-logo">{visibleData.company.name.slice(0,2).toUpperCase()}</div><div><h2>{visibleData.company.name}</h2><p>{visibleData.company.segment||"Segmento não informado"}</p><div className="summary-meta">{visibleData.company.city||visibleData.company.state?<span><MapPin/>{[visibleData.company.city,visibleData.company.state].filter(Boolean).join(", ")}</span>:null}{visibleData.company.primaryEmail?<span><Mail/>{visibleData.company.primaryEmail}</span>:null}</div></div><Button variant="outline" onClick={()=>setEditingCompanyId(editing?null:companyId)}><Edit3/>{editing?"Cancelar edição":"Editar"}</Button></div>{visibleData.company.primaryEmailStatus==="INVALID"&&<div className="cm-notice"><div><p>E-mail inv?lido conhecido: {deliveryLabels[visibleData.company.primaryEmailStatusReason||""]||"Falha permanente"}. Corrija o endere?o ou restaure o status ap?s revis?o.</p><Button variant="outline" disabled={saving} onClick={()=>void restoreEmailStatus()}>Restaurar status para desconhecido</Button></div></div>}<Tabs defaultValue="overview"><TabsList variant="line" className="detail-tabs"><TabsTrigger value="overview">Visão geral</TabsTrigger><TabsTrigger value="contacts">Contatos <b>{visibleData.contacts.length}</b></TabsTrigger><TabsTrigger value="activity">Timeline <b>{visibleData.activities.length}</b></TabsTrigger></TabsList><TabsContent value="overview">{editing?<CompanyForm company={visibleData.company} saving={saving} onSubmit={saveCompany}/>:<CompanyOverview company={visibleData.company}/>}</TabsContent><TabsContent value="contacts"><div className="section-toolbar"><div><h3>Contatos da empresa</h3><p>Registre as pessoas envolvidas na negociação.</p></div><Button onClick={()=>{setEditingContact(null);setContactOpen(true)}}><Plus/>Adicionar contato</Button></div>{visibleData.contacts.length?<div className="contact-list">{visibleData.contacts.map(contact=><article key={contact.id} className="contact-card"><div className="contact-avatar"><UserRound/></div><div className="contact-main"><div><strong>{contact.name||"Contato sem nome"}</strong>{contact.isPrimary&&<span className="primary-tag"><Star/>Principal</span>}</div><small>{contact.role||"Cargo não informado"}</small><div className="contact-lines">{contact.email&&<span><Mail/>{contact.email}</span>}{contact.phone&&<span><Phone/>{contact.phone}</span>}</div></div><div className="contact-actions"><button onClick={()=>{setEditingContact(contact);setContactOpen(true)}} aria-label="Editar contato"><Edit3/></button><button onClick={()=>deleteContact(contact)} aria-label="Excluir contato"><Trash2/></button></div></article>)}</div>:<div className="detail-empty"><UserRound/><h3>Nenhum contato cadastrado</h3><p>Adicione quem você procura ou com quem já está conversando.</p><Button onClick={()=>{setEditingContact(null);setContactOpen(true)}}><Plus/>Adicionar primeiro contato</Button></div>}</TabsContent><TabsContent value="activity"><div className="section-toolbar"><div><h3>Histórico da empresa</h3><p>As ações são registradas automaticamente.</p></div></div><ol className="timeline">{visibleData.activities.map((a,index)=><li key={a.id}><span className="timeline-dot">{index===0?<Check/>:<Clock3/>}</span><div><strong>{a.description}</strong><small>{new Date(a.createdAt).toLocaleString("pt-BR")}</small></div></li>)}</ol></TabsContent></Tabs></div>:null}<ContactDialog open={contactOpen} onOpenChange={setContactOpen} companyId={companyId} contact={editingContact} onSaved={load}/></SheetContent></Sheet>;
+type Company = { id: number; name: string; tradeName?: string | null; cnpj?: string | null; website?: string | null; primaryEmail?: string | null; primaryEmailStatus?: string; primaryEmailStatusReason?: string | null; segment?: string | null; region?: number | null; address?: string | null; city?: string | null; state?: string | null; phone?: string | null; phoneWhatsAppStatus?: "UNKNOWN" | "YES" | "NO"; mobile?: string | null; mobileWhatsAppStatus?: "UNKNOWN" | "YES" | "NO"; employeeCount?: number | null; employeeRange?: string | null; companySize?: string | null; notes?: string | null; status: string; createdAt: string; updatedAt: string };
+type Contact = { id: number; name?: string | null; email?: string | null; phone?: string | null; role?: string | null; isPrimary: boolean; createdAt: string };
+type Activity = { id: number; type: string; description: string; createdAt: string };
+type Detail = { company: Company; contacts: Contact[]; activities: Activity[] };
+const statuses = [["NOT_CONTACTED", "Não contatada"], ["CONTACTED", "Contatada"], ["WAITING_REPLY", "Aguardando resposta"], ["REPLIED", "Respondeu"], ["FOLLOW_UP", "Follow-up"], ["INTERESTED", "Interessada"], ["NOT_INTERESTED", "Sem interesse"], ["CLOSED", "Cliente / encerrada"]] as const;
+// Mirrors the color language used for the status pill in companies-page.tsx.
+const statusClass: Record<string, string> = { NOT_CONTACTED: "", CONTACTED: "blue", WAITING_REPLY: "amber", REPLIED: "violet", FOLLOW_UP: "orange", INTERESTED: "green", NOT_INTERESTED: "red", CLOSED: "slate" };
+// Icon per activity type: only reliable, already-returned types are mapped (no text heuristics).
+function activityIcon(type: string) {
+  switch (type) {
+    case "EMAIL_SENT":
+    case "EMAIL_ADDRESS_REVIEWED":
+    case "EMAIL_ADDRESS_INVALIDATED":
+    case "GMAIL_CONNECTED":
+    case "GMAIL_DISCONNECTED":
+      return <Mail />;
+    case "CONTACT_CREATED":
+    case "CONTACT_UPDATED":
+    case "CONTACT_DELETED":
+      return <UserRound />;
+    case "COMPANY_CREATED":
+    case "COMPANY_UPDATED":
+    case "IMPORT_COMPLETED":
+      return <Building2 />;
+    default:
+      return <Clock3 />;
+  }
 }
 
-function CompanyOverview({company}:{company:Company}){const label=statuses.find(s=>s[0]===company.status)?.[1]||company.status;return <div className="overview-grid"><Info label="Status" value={label}/><Info label="CNPJ" value={formatCnpj(company.cnpj)}/><Info label="Nome fantasia" value={company.name}/><Info label="Razão social" value={company.tradeName}/><Info label="Telefone" value={formatBrazilianPhone(company.phone)} icon={company.phoneWhatsAppStatus==="YES"?<MessageCircle className="confirmed-whatsapp-icon"/>:undefined}/><Info label="Celular" value={formatBrazilianPhone(company.mobile)} icon={company.mobileWhatsAppStatus==="YES"?<MessageCircle className="confirmed-whatsapp-icon"/>:undefined}/><Info label="E-mail" value={company.primaryEmail}/><Info label="Endereço" value={company.address}/><Info label="Região" value={company.region?`Região ${company.region}`:null}/><Info label="Cidade" value={[company.city,company.state].filter(Boolean).join(", ")}/><Info label="Quadro de funcionários" value={company.employeeRange||(company.employeeCount==null?null:String(company.employeeCount))}/><Info label="Porte" value={company.companySize}/><Info label="Site" value={company.website}/><Info label="Cadastrada em" value={new Date(company.createdAt).toLocaleDateString("pt-BR")} icon={<Calendar/>}/><Info label="Última atualização" value={new Date(company.updatedAt).toLocaleString("pt-BR")} icon={<Clock3/>}/><div className="info-card notes-card"><span>Observações</span><p>{company.notes||"Nenhuma observação registrada."}</p></div></div>}
-function Info({label,value,icon}:{label:string;value?:string|null;icon?:React.ReactNode}){return <div className="info-card"><span>{icon}{label}</span><strong>{value||"Não informado"}</strong></div>}
-function CompanyForm({company,saving,onSubmit}:{company:Company;saving:boolean;onSubmit:(e:React.FormEvent<HTMLFormElement>)=>void}){const[employeeCount,setEmployeeCount]=useState(company.employeeRange||(company.employeeCount==null?"":String(company.employeeCount)));const companySize=parseWorkforce(employeeCount).companySize;return <form className="detail-form" onSubmit={onSubmit}><div className="form-grid"><Field name="name" label="Nome fantasia *" defaultValue={company.name} required/><Field name="tradeName" label="Razão social" defaultValue={company.tradeName||""}/><Field name="cnpj" label="CNPJ" inputMode="numeric" defaultValue={formatCnpj(company.cnpj)}/><Field name="primaryEmail" label="E-mail" type="email" defaultValue={company.primaryEmail||""}/><Field name="phone" label="Telefone" defaultValue={formatBrazilianPhone(company.phone)}/><WhatsAppStatusField name="phoneWhatsAppStatus" label="WhatsApp do telefone" defaultValue={company.phoneWhatsAppStatus||"UNKNOWN"}/><Field name="mobile" label="Celular" defaultValue={formatBrazilianPhone(company.mobile)}/><WhatsAppStatusField name="mobileWhatsAppStatus" label="WhatsApp do celular" defaultValue={company.mobileWhatsAppStatus||"UNKNOWN"}/><Field name="segment" label="Segmento" defaultValue={company.segment||""}/><Field name="region" label="Região" type="number" min="1" max="17" defaultValue={company.region?String(company.region):""}/><Field name="address" label="Endereço" defaultValue={company.address||""}/><Field name="city" label="Cidade" defaultValue={company.city||""}/><Field name="state" label="UF" maxLength={2} defaultValue={company.state||""}/><div className="field"><Label htmlFor="detail-employeeCount">Quadro de funcionários</Label><Input id="detail-employeeCount" name="employeeCount" value={employeeCount} onChange={e=>setEmployeeCount(e.target.value)} placeholder="Ex.: 32 ou 20 a 40"/></div><div className="field"><Label>Porte calculado</Label><Input value={companySize||"Informe o quadro de funcionários"} readOnly/></div><div className="field"><Label htmlFor="detail-status">Status</Label><Select name="status" defaultValue={company.status}><SelectTrigger id="detail-status"><SelectValue/></SelectTrigger><SelectContent>{statuses.map(([value,label])=><SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div><div className="field full"><Label htmlFor="detail-notes">Observações</Label><Textarea id="detail-notes" name="notes" defaultValue={company.notes||""}/></div></div><div className="detail-form-actions"><Button type="submit" disabled={saving}>{saving?"Salvando...":"Salvar alterações"}</Button></div></form>}
-function Field({label,name,...props}:{label:string;name:string}&React.ComponentProps<typeof Input>){return <div className="field"><Label htmlFor={`detail-${name}`}>{label}</Label><Input id={`detail-${name}`} name={name} {...props}/></div>}
-function WhatsAppStatusField({name,label,defaultValue}:{name:string;label:string;defaultValue:"UNKNOWN"|"YES"|"NO"}){return <div className="field"><Label>{label}</Label><Select name={name} defaultValue={defaultValue}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="UNKNOWN">Não verificado</SelectItem><SelectItem value="YES">Tem WhatsApp</SelectItem><SelectItem value="NO">Não tem WhatsApp</SelectItem></SelectContent></Select></div>}
-function ContactDialog({open,onOpenChange,companyId,contact,onSaved}:{open:boolean;onOpenChange:(open:boolean)=>void;companyId:number|null;contact:Contact|null;onSaved:()=>Promise<void>}){const[saving,setSaving]=useState(false);async function submit(e:React.FormEvent<HTMLFormElement>){e.preventDefault();if(!companyId)return;setSaving(true);const body=Object.fromEntries(new FormData(e.currentTarget));if(contact)body.contactId=String(contact.id);const r=await fetch(`/api/companies/${companyId}/contacts`,{method:contact?"PATCH":"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});const result=await r.json() as {error?:string};setSaving(false);if(!r.ok)return toast.error(result.error||"Não foi possível salvar o contato.");toast.success(contact?"Contato atualizado.":"Contato adicionado.");onOpenChange(false);await onSaved()}return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><form key={contact?.id||"new"} onSubmit={submit}><DialogHeader><DialogTitle>{contact?"Editar contato":"Novo contato"}</DialogTitle><DialogDescription>Registre nome, cargo e canais de contato.</DialogDescription></DialogHeader><div className="form-grid"><Field name="name" label="Nome" defaultValue={contact?.name||""}/><Field name="email" label="E-mail" type="email" defaultValue={contact?.email||""}/><Field name="phone" label="Telefone" defaultValue={contact?.phone||""}/><Field name="role" label="Cargo" defaultValue={contact?.role||""}/><div className="field full"><Label htmlFor="contact-primary">Contato principal</Label><Select name="isPrimary" defaultValue={contact?.isPrimary?"true":"false"}><SelectTrigger id="contact-primary"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="false">Não</SelectItem><SelectItem value="true">Sim</SelectItem></SelectContent></Select></div></div><DialogFooter><Button type="button" variant="outline" onClick={()=>onOpenChange(false)}>Cancelar</Button><Button type="submit" disabled={saving}>{saving?"Salvando...":"Salvar contato"}</Button></DialogFooter></form></DialogContent></Dialog>}
+export function CompanyDetail({ companyId, onClose, onChanged }: { companyId: number | null; onClose: () => void; onChanged: () => void }) {
+  const [data, setData] = useState<Detail | null>(null), [loadingId, setLoadingId] = useState<number | null>(null), [saving, setSaving] = useState(false), [editingCompanyId, setEditingCompanyId] = useState<number | null>(null), [contactOpen, setContactOpen] = useState(false), [editingContact, setEditingContact] = useState<Contact | null>(null);
+  const visibleData = data?.company.id === companyId ? data : null;
+  const loading = companyId !== null && (loadingId === companyId || !visibleData);
+  const editing = companyId !== null && editingCompanyId === companyId;
+  const load = useCallback(async () => { if (!companyId) return; const requestedId = companyId; setLoadingId(requestedId); try { const r = await fetch(`/api/companies/${requestedId}`); if (!r.ok) throw new Error(); const next = await r.json() as Detail; if (next.company.id === requestedId) setData(next) } catch { toast.error("Não foi possível abrir a empresa."); onClose() } finally { setLoadingId(current => current === requestedId ? null : current) } }, [companyId, onClose]);
+  useEffect(() => {
+    if (!companyId) return;
+
+    const timer = setTimeout(() => {
+      void load();
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [companyId, load]);
+  async function saveCompany(e: React.FormEvent<HTMLFormElement>) { e.preventDefault(); if (!companyId) return; setSaving(true); const body = Object.fromEntries(new FormData(e.currentTarget)); body.statusLabel = statuses.find(s => s[0] === body.status)?.[1] || String(body.status); const r = await fetch(`/api/companies/${companyId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); const result = await r.json() as { error?: string }; setSaving(false); if (!r.ok) return toast.error(result.error || "Não foi possível salvar."); toast.success("Dados atualizados."); setEditingCompanyId(null); await load(); onChanged() }
+  async function deleteContact(contact: Contact) { if (!companyId || !confirm(`Remover o contato ${contact.name || contact.email}?`)) return; const r = await fetch(`/api/companies/${companyId}/contacts?contactId=${contact.id}`, { method: "DELETE" }); if (r.ok) { toast.success("Contato removido."); await load() } else toast.error("Não foi possível remover o contato.") }
+  async function restoreEmailStatus() { if (!visibleData) return; setSaving(true); try { const r = await fetch(`/api/companies/${companyId}/email-status`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedEmail: visibleData.company.primaryEmail || "" }) }); if (!r.ok) throw new Error(); toast.success("Status do e-mail restaurado."); await load(); onChanged() } catch { toast.error("Não foi possível restaurar o status. Atualize a empresa e tente novamente.") } finally { setSaving(false) } }
+  return <Sheet open={companyId !== null} onOpenChange={open => { if (!open) { setEditingCompanyId(null); onClose() } }}>
+    <SheetContent className="company-sheet sm:max-w-[820px]" aria-describedby="company-detail-description">
+      <SheetHeader className="detail-header">
+        <SheetTitle>{loading ? "Carregando empresa…" : visibleData?.company.name || "Empresa"}</SheetTitle>
+        <SheetDescription id="company-detail-description">Dados, contatos e histórico da prospecção em um só lugar.</SheetDescription>
+      </SheetHeader>
+      {loading ? <div className="detail-loading"><Skeleton /><Skeleton /><Skeleton /></div> : visibleData ? <div className="detail-scroll">
+        <div className="company-detail-head">
+          <div className="company-detail-avatar">{visibleData.company.name.slice(0, 2).toUpperCase()}</div>
+          <div className="company-detail-identity">
+            <h2>{visibleData.company.name}</h2>
+            <p>{visibleData.company.tradeName || visibleData.company.segment || "Segmento não informado"}</p>
+            {(visibleData.company.city || visibleData.company.state) && <div className="company-detail-head-meta"><MapPin />{[visibleData.company.city, visibleData.company.state].filter(Boolean).join(", ")}</div>}
+            <div className="company-detail-badges">
+              <span className={`company-detail-badge status ${statusClass[visibleData.company.status] || ""}`}>{statuses.find(s => s[0] === visibleData.company.status)?.[1] || visibleData.company.status}</span>
+              {visibleData.company.companySize && <span className="company-detail-badge">{visibleData.company.companySize}</span>}
+              {visibleData.company.region ? <span className="company-detail-badge">Região {visibleData.company.region}</span> : null}
+            </div>
+          </div>
+          <Button variant="outline" onClick={() => setEditingCompanyId(editing ? null : companyId)}><Edit3 />{editing ? "Cancelar edição" : "Editar"}</Button>
+        </div>
+        {visibleData.company.primaryEmailStatus === "INVALID" && <div className="cm-notice"><div><p>E-mail inválido conhecido: {deliveryLabels[visibleData.company.primaryEmailStatusReason || ""] || "Falha permanente"}. Corrija o endereço ou restaure o status após revisão.</p><Button variant="outline" disabled={saving} onClick={() => void restoreEmailStatus()}>Restaurar status para desconhecido</Button></div></div>}
+        <Tabs defaultValue="overview">
+          <TabsList variant="line" className="detail-tabs">
+            <TabsTrigger value="overview">Visão geral</TabsTrigger>
+            <TabsTrigger value="contacts">Contatos <b>{visibleData.contacts.length}</b></TabsTrigger>
+            <TabsTrigger value="activity">Timeline <b>{visibleData.activities.length}</b></TabsTrigger>
+          </TabsList>
+          <TabsContent value="overview">{editing ? <CompanyForm company={visibleData.company} saving={saving} onSubmit={saveCompany} /> : <CompanyOverview company={visibleData.company} />}</TabsContent>
+          <TabsContent value="contacts">
+            <div className="section-toolbar">
+              <div>
+                <h3>Contatos da empresa</h3>
+                <p>Registre as pessoas envolvidas na negociação.</p>
+              </div>
+              <Button onClick={() => { setEditingContact(null); setContactOpen(true) }}><Plus />Adicionar contato</Button>
+            </div>
+            {visibleData.contacts.length ? <div className="contact-list">{visibleData.contacts.map(contact =>
+              <article key={contact.id} className="contact-card">
+                <div className="contact-avatar"><UserRound /></div>
+                <div className="contact-main">
+                  <div><strong>{contact.name || "Contato sem nome"}</strong>{contact.isPrimary && <span className="primary-tag"><Star />Principal</span>}</div>
+                  <small>{contact.role || "Cargo não informado"}</small>
+                  <div className="contact-lines">{contact.email && <span><Mail />{contact.email}</span>}{contact.phone && <span><Phone />{contact.phone}</span>}</div>
+                </div>
+                <div className="contact-actions">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`Ações de ${contact.name || "contato"}`}><MoreHorizontal /></Button></DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => { setEditingContact(contact); setContactOpen(true) }}><Edit3 />Editar contato</DropdownMenuItem>
+                      <DropdownMenuItem variant="destructive" onSelect={() => void deleteContact(contact)}><Trash2 />Excluir contato</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </article>)}</div> : <div className="detail-empty">
+              <UserRound />
+              <h3>Nenhum contato cadastrado</h3>
+              <p>Adicione quem você procura ou com quem já está conversando.</p>
+              <Button onClick={() => { setEditingContact(null); setContactOpen(true) }}><Plus />Adicionar primeiro contato</Button>
+            </div>}
+          </TabsContent>
+          <TabsContent value="activity">
+            <div className="section-toolbar">
+              <div>
+                <h3>Histórico da empresa</h3>
+                <p>As ações são registradas automaticamente.</p>
+              </div>
+            </div>
+            <ol className="timeline">{visibleData.activities.map(a =>
+              <li key={a.id}>
+                <span className="timeline-dot">{activityIcon(a.type)}</span>
+                <div>
+                  <strong>{a.description}</strong>
+                  <small>{new Date(a.createdAt).toLocaleString("pt-BR")}</small>
+                </div>
+              </li>)}</ol>
+          </TabsContent>
+        </Tabs>
+      </div> : null}
+      <ContactDialog open={contactOpen} onOpenChange={setContactOpen} companyId={companyId} contact={editingContact} onSaved={load} />
+    </SheetContent>
+  </Sheet>;
+}
+
+function CompanyOverview({ company }: { company: Company }) {
+  const emailInvalid = company.primaryEmailStatus === "INVALID";
+  return <div className="company-detail-overview">
+    <section className="company-detail-section">
+      <h3>Informações da empresa</h3>
+      <div className="company-detail-fields">
+        <Field2 label="CNPJ" value={formatCnpj(company.cnpj)} />
+        <Field2 label="Razão social" value={company.tradeName} />
+        <Field2 label="Porte" value={company.companySize} />
+        <Field2 label="Quadro de funcionários" value={company.employeeRange || (company.employeeCount == null ? null : String(company.employeeCount))} />
+        <Field2 label="Segmento" value={company.segment} />
+        <Field2 label="Site" value={company.website} />
+      </div>
+    </section>
+    <section className="company-detail-section">
+      <h3>Contato</h3>
+      <div className="company-detail-channels">
+        <div className="company-detail-channel">
+          <Mail />
+          <div>
+            <strong>{company.primaryEmail || "Não informado"}</strong>
+            {emailInvalid && <small className="channel-bad">E-mail inválido conhecido</small>}
+          </div>
+        </div>
+        <div className="company-detail-channel">
+          <Phone />
+          <div>
+            <strong>{formatBrazilianPhone(company.phone) || "Não informado"}</strong>
+            {company.phone && company.phoneWhatsAppStatus === "YES" && <small className="channel-ok"><MessageCircle />WhatsApp confirmado</small>}
+          </div>
+        </div>
+        <div className="company-detail-channel">
+          <Phone />
+          <div>
+            <strong>{formatBrazilianPhone(company.mobile) || "Não informado"}</strong>
+            {company.mobile && company.mobileWhatsAppStatus === "YES" && <small className="channel-ok"><MessageCircle />WhatsApp confirmado</small>}
+          </div>
+        </div>
+      </div>
+    </section>
+    <section className="company-detail-section">
+      <h3>Localização</h3>
+      <div className="company-detail-location">
+        <strong>{[company.city, company.state].filter(Boolean).join(", ") || "Cidade não informada"}</strong>
+        {company.address && <p>{company.address}</p>}
+        {company.region ? <small>Região {company.region}</small> : null}
+      </div>
+    </section>
+    <section className="company-detail-section">
+      <h3>CRM</h3>
+      <div className="company-detail-fields">
+        <Field2 label="Status" value={statuses.find(s => s[0] === company.status)?.[1] || company.status} />
+        <Field2 label="Cadastrada em" value={new Date(company.createdAt).toLocaleDateString("pt-BR")} />
+        <Field2 label="Última atualização" value={new Date(company.updatedAt).toLocaleString("pt-BR")} />
+      </div>
+    </section>
+    <section className="company-detail-section">
+      <h3>Observações</h3>
+      <div className="company-detail-notes">{company.notes || "Nenhuma observação registrada."}</div>
+    </section>
+  </div>
+}
+function Field2({ label, value }: { label: string; value?: string | null }) { return <div className="company-detail-field"><span>{label}</span><strong>{value || "Não informado"}</strong></div> }
+function CompanyForm({ company, saving, onSubmit }: { company: Company; saving: boolean; onSubmit: (e: React.FormEvent<HTMLFormElement>) => void }) {
+  const [employeeCount, setEmployeeCount] = useState(company.employeeRange || (company.employeeCount == null ? "" : String(company.employeeCount)));
+  const companySize = parseWorkforce(employeeCount).companySize;
+  return <form className="detail-form" onSubmit={onSubmit}>
+    <div className="form-grid">
+      <Field name="name" label="Nome fantasia *" defaultValue={company.name} required />
+      <Field name="tradeName" label="Razão social" defaultValue={company.tradeName || ""} />
+      <Field name="cnpj" label="CNPJ" inputMode="numeric" defaultValue={formatCnpj(company.cnpj)} />
+      <Field name="primaryEmail" label="E-mail" type="email" defaultValue={company.primaryEmail || ""} />
+      <Field name="phone" label="Telefone" defaultValue={formatBrazilianPhone(company.phone)} />
+      <WhatsAppStatusField name="phoneWhatsAppStatus" label="WhatsApp do telefone" defaultValue={company.phoneWhatsAppStatus || "UNKNOWN"} />
+      <Field name="mobile" label="Celular" defaultValue={formatBrazilianPhone(company.mobile)} />
+      <WhatsAppStatusField name="mobileWhatsAppStatus" label="WhatsApp do celular" defaultValue={company.mobileWhatsAppStatus || "UNKNOWN"} />
+      <Field name="segment" label="Segmento" defaultValue={company.segment || ""} />
+      <Field name="region" label="Região" type="number" min="1" max="17" defaultValue={company.region ? String(company.region) : ""} />
+      <Field name="address" label="Endereço" defaultValue={company.address || ""} />
+      <Field name="city" label="Cidade" defaultValue={company.city || ""} />
+      <Field name="state" label="UF" maxLength={2} defaultValue={company.state || ""} />
+      <div className="field">
+        <Label htmlFor="detail-employeeCount">Quadro de funcionários</Label>
+        <Input id="detail-employeeCount" name="employeeCount" value={employeeCount} onChange={e => setEmployeeCount(e.target.value)} placeholder="Ex.: 32 ou 20 a 40" />
+      </div>
+      <div className="field">
+        <Label>Porte calculado</Label>
+        <Input value={companySize || "Informe o quadro de funcionários"} readOnly />
+      </div>
+      <div className="field">
+        <Label htmlFor="detail-status">Status</Label>
+        <Select name="status" defaultValue={company.status}>
+          <SelectTrigger id="detail-status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>{statuses.map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+        </Select>
+      </div>
+      <div className="field full">
+        <Label htmlFor="detail-notes">Observações</Label>
+        <Textarea id="detail-notes" name="notes" defaultValue={company.notes || ""} />
+      </div>
+    </div>
+    <div className="detail-form-actions">
+      <Button type="submit" disabled={saving}>{saving ? "Salvando..." : "Salvar alterações"}</Button>
+    </div>
+  </form>
+}
+function Field({ label, name, ...props }: { label: string; name: string } & React.ComponentProps<typeof Input>) { return <div className="field"><Label htmlFor={`detail-${name}`}>{label}</Label><Input id={`detail-${name}`} name={name} {...props} /></div> }
+function WhatsAppStatusField({ name, label, defaultValue }: { name: string; label: string; defaultValue: "UNKNOWN" | "YES" | "NO" }) {
+  return <div className="field">
+    <Label>{label}</Label>
+    <Select name={name} defaultValue={defaultValue}>
+      <SelectTrigger><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="UNKNOWN">Não verificado</SelectItem>
+        <SelectItem value="YES">Tem WhatsApp</SelectItem>
+        <SelectItem value="NO">Não tem WhatsApp</SelectItem>
+      </SelectContent>
+    </Select>
+  </div>
+}
+function ContactDialog({ open, onOpenChange, companyId, contact, onSaved }: { open: boolean; onOpenChange: (open: boolean) => void; companyId: number | null; contact: Contact | null; onSaved: () => Promise<void> }) {
+  const [saving, setSaving] = useState(false);
+  async function submit(e: React.FormEvent<HTMLFormElement>) { e.preventDefault(); if (!companyId) return; setSaving(true); const body = Object.fromEntries(new FormData(e.currentTarget)); if (contact) body.contactId = String(contact.id); const r = await fetch(`/api/companies/${companyId}/contacts`, { method: contact ? "PATCH" : "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); const result = await r.json() as { error?: string }; setSaving(false); if (!r.ok) return toast.error(result.error || "Não foi possível salvar o contato."); toast.success(contact ? "Contato atualizado." : "Contato adicionado."); onOpenChange(false); await onSaved() }
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent>
+      <form key={contact?.id || "new"} onSubmit={submit}>
+        <DialogHeader>
+          <DialogTitle>{contact ? "Editar contato" : "Novo contato"}</DialogTitle>
+          <DialogDescription>Registre nome, cargo e canais de contato.</DialogDescription>
+        </DialogHeader>
+        <div className="form-grid">
+          <Field name="name" label="Nome" defaultValue={contact?.name || ""} />
+          <Field name="email" label="E-mail" type="email" defaultValue={contact?.email || ""} />
+          <Field name="phone" label="Telefone" defaultValue={contact?.phone || ""} />
+          <Field name="role" label="Cargo" defaultValue={contact?.role || ""} />
+          <div className="field full">
+            <Label htmlFor="contact-primary">Contato principal</Label>
+            <Select name="isPrimary" defaultValue={contact?.isPrimary ? "true" : "false"}>
+              <SelectTrigger id="contact-primary"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="false">Não</SelectItem>
+                <SelectItem value="true">Sim</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button type="submit" disabled={saving}>{saving ? "Salvando..." : "Salvar contato"}</Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
+}
