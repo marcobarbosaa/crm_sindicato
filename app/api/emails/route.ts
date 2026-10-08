@@ -1,5 +1,7 @@
 import { SendFailure, databaseFailure, logSend } from "@/lib/send-diagnostics";
 import { sendingDayWindow } from "@/lib/settings";
+import { dailyCampaignUsage } from "@/lib/campaign-quota";
+import { acquireSendLease, releaseSendLease } from "@/lib/shared-send-control";
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -26,7 +28,15 @@ export async function GET(){
 }
 
 export async function POST(request:NextRequest){
- const requestId=crypto.randomUUID(); let stage="validation", messageId:number|undefined, gmailAccepted=false;
+ let lease:Awaited<ReturnType<typeof acquireSendLease>>;
+ try { lease=await acquireSendLease(ownerId()); }
+ catch { return NextResponse.json({error:"Não foi possível reservar o envio. Tente novamente."},{status:503}); }
+ if(!lease)return NextResponse.json({error:"Há outro envio em processamento nesta conta. Aguarde e tente novamente."},{status:409});
+ try { return await sendIndividual(request,lease.expiresAt); }
+ finally { await releaseSendLease(ownerId(),lease.token).catch(()=>{}); }
+}
+async function sendIndividual(request:NextRequest,leaseExpiresAt:Date){
+ const requestId=crypto.randomUUID(); let stage="validation", messageId:number|undefined, gmailAccepted=false, gmailStarted=false;
  const enter=(next:string)=>{stage=next;logSend(requestId,stage,"started");};
  const respond=(data:unknown,init?:{status:number})=>{
    const status=init?.status||200;
@@ -50,7 +60,7 @@ export async function POST(request:NextRequest){
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient))return respond({error:"Informe um e-mail de destinatário válido."},{status:400});
  if(!subject)return respond({error:"Informe o assunto do e-mail."},{status:400}); if(!body)return respond({error:"Escreva o conteúdo do e-mail."},{status:400});
  if(subject.length>200||body.length>20000)return respond({error:"O assunto ou a mensagem ultrapassou o limite permitido."},{status:400});
- const [settings]=await db.select().from(crmSettings).where(eq(crmSettings.ownerId,owner)).limit(1);const {start:startToday}=sendingDayWindow(settings?.timezone);const [today]=await db.select({total:sql<number>`count(*)`}).from(emailMessages).where(and(eq(emailMessages.ownerId,owner),eq(emailMessages.status,"SENT"),gte(emailMessages.sentAt,sql`${startToday.getTime()}`)));if(Number(today?.total||0)>=(settings?.dailySendLimit||100))return respond({error:"Seu limite diário de envios foi atingido. Ajuste-o em Configurações ou aguarde o próximo dia."},{status:429});if(settings?.signature)body=`${body}\n\n${settings.signature}`;
+ const [settings]=await db.select().from(crmSettings).where(eq(crmSettings.ownerId,owner)).limit(1);const {start:startToday,next:nextDay}=sendingDayWindow(settings?.timezone);const [today]=await db.select({total:sql<number>`count(*)`}).from(emailMessages).where(dailyCampaignUsage(owner,startToday,nextDay));if(Number(today?.total||0)>=(settings?.dailySendLimit||100))return respond({error:"Seu limite diário de envios foi atingido. Ajuste-o em Configurações ou aguarde o próximo dia."},{status:429});if(settings?.signature)body=`${body}\n\n${settings.signature}`;
  const [account]=await db.select().from(emailAccounts).where(and(eq(emailAccounts.ownerId,owner),eq(emailAccounts.provider,"GMAIL"))).limit(1); if(!account)throw new SendFailure("OAUTH_REAUTH_REQUIRED","GMAIL_ACCOUNT_MISSING",409);
  accountSnapshot=account;
  if(!account.scopes.split(/\s+/).includes(GMAIL_SEND_SCOPE))throw new SendFailure("OAUTH_REAUTH_REQUIRED","GMAIL_SCOPE_MISSING",409);
@@ -74,11 +84,14 @@ export async function POST(request:NextRequest){
  enter("gmail-encode");
  const raw=encodeRawEmail({from:account.email,to:recipient,subject,body,attachments});
  enter("gmail-send");
+ if(Date.now()+30_000>=leaseExpiresAt.getTime())throw new SendFailure("RUNTIME_FAILURE","SEND_LEASE_EXPIRED",503);
  let response:Response;
+ gmailStarted=true;
  try{response=await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send",{method:"POST",redirect:"manual",signal:AbortSignal.timeout(30_000),headers:{authorization:`Bearer ${accessToken}`,"content-type":"application/json"},body:JSON.stringify({raw})});}
  catch{throw new SendFailure("GMAIL_PROVIDER_FAILURE","GMAIL_TRANSPORT_FAILURE",502);}
  if(response.status>=300&&response.status<400)throw new SendFailure("GMAIL_PROVIDER_FAILURE","GMAIL_REDIRECT_REJECTED",502,response.status);
  const result=await response.json().catch(()=>null) as {id?:unknown}|null;
+ if(!response.ok)gmailStarted=false;
  if(!response.ok)throw new SendFailure("GMAIL_PROVIDER_FAILURE",response.status===429?"GMAIL_RATE_LIMIT":response.status>=500?"GMAIL_TEMPORARY_FAILURE":"GMAIL_PERMANENT_FAILURE",502,response.status);
  if(typeof result?.id!=="string"||!result.id)throw new SendFailure("GMAIL_PROVIDER_FAILURE","GMAIL_INVALID_RESPONSE",502,response.status);
  gmailAccepted=true;
@@ -97,7 +110,7 @@ export async function POST(request:NextRequest){
  }
  // Once Gmail accepted a message, never label it FAILED or imply a retry is safe.
  if(db&&messageId&&!gmailAccepted){
-   try{await db.update(emailMessages).set({status:"FAILED",errorMessage:failure.code}).where(eq(emailMessages.id,messageId));}
+   try{await db.update(emailMessages).set({status:gmailStarted?"UNCERTAIN":"FAILED",errorMessage:failure.code}).where(eq(emailMessages.id,messageId));}
    catch(persistError){logSend(requestId,"persist-result","failed",databaseFailure(persistError));}
  }
  return NextResponse.json({error:gmailAccepted?"O Gmail aceitou o envio, mas houve falha ao salvar o resultado. Não reenvie antes de conferir os enviados.":failure.category==="OAUTH_REAUTH_REQUIRED"?"Reconecte sua conta Gmail em Configurações antes de enviar novamente.":"Não foi possível concluir o envio. Consulte o código de diagnóstico.",category:failure.category,errorCode:failure.code,stage,requestId,gmailAccepted},{status:failure.status,headers:{"x-request-id":requestId}});

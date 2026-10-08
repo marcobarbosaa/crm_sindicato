@@ -52,3 +52,5 @@ next-env.d.ts
 
 /docs/*
 !/docs/gmail-delivery-monitoring.md
+!/docs/smart-sends-audit.md
+!/docs/smart-sends.md

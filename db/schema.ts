@@ -17,6 +17,37 @@ const timestampMs = customType<{ data: Date; driverData: number }>({
   fromDriver: (value) => new Date(Number(value)),
 });
 
+export const documentSendBatches = pgTable('document_send_batches', {
+  id: serial('id').primaryKey(), ownerId: text('owner_id').notNull(), name: text('name').notNull(),
+  status: text('status').notNull().default('DRAFT'), revision: integer('revision').notNull().default(0),
+  templateId: integer('template_id').references(() => emailTemplates.id, { onDelete: 'set null' }), templateName: text('template_name'), senderAddress: text('sender_address'), accountId: integer('account_id').references(() => emailAccounts.id, { onDelete: 'set null' }),
+  commonAttachments: jsonb('common_attachments').$type<import('../lib/attachments').Attachment[]>().notNull().default([]),
+  intervalSeconds: integer('interval_seconds').notNull().default(60), nextRunAt: timestampMs('next_run_at'),
+  lockToken: text('lock_token'), lockUntil: timestampMs('lock_until'), notice: text('notice'),
+  confirmedAt: timestampMs('confirmed_at'), completedAt: timestampMs('completed_at'),
+  createdAt: timestampMs('created_at').notNull(), updatedAt: timestampMs('updated_at').notNull(),
+}, t => [index('idx_document_batches_due').on(t.status, t.nextRunAt), index('idx_document_batches_owner').on(t.ownerId, t.createdAt)]);
+export const documentSendItems = pgTable('document_send_items', {
+  id: text('id').primaryKey(), ownerId: text('owner_id').notNull(), batchId: integer('batch_id').notNull().references(() => documentSendBatches.id),
+  fileName: text('file_name').notNull(), fileSize: integer('file_size').notNull(), contentHash: text('content_hash').notNull(), storageKey: text('storage_key').notNull().unique(),
+  fileReady: boolean('file_ready').notNull().default(false), readable: boolean('readable').notNull().default(false), removedAt: timestampMs('removed_at'), fileDeletedAt: timestampMs('file_deleted_at'),
+  duplicateOf: text('duplicate_of'), companyId: integer('company_id').references(() => companies.id, { onDelete: 'set null' }), companyName: text('company_name'), companyCnpj: text('company_cnpj'), recipient: text('recipient'),
+  extractedCnpjs: jsonb('extracted_cnpjs').$type<string[]>().notNull().default([]), candidates: jsonb('candidates').$type<number[]>().notNull().default([]),
+  identificationMethod: text('identification_method').notNull().default('MANUAL'), reviewStatus: text('review_status').notNull().default('UPLOADING'),
+  confirmedAt: timestampMs('confirmed_at'), excluded: boolean('excluded').notNull().default(false),
+  subject: text('subject'), body: text('body'), sendStatus: text('send_status').notNull().default('DRAFT'), attempts: integer('attempts').notNull().default(0), infrastructureAttempts: integer('infrastructure_attempts').notNull().default(0),
+  messageId: integer('message_id'), rfcMessageId: text('rfc_message_id').notNull().unique(), providerMessageId: text('provider_message_id'),
+  processingAt: timestampMs('processing_at'), sentAt: timestampMs('sent_at'), error: text('error'),
+  deliveryStatus: text('delivery_status').notNull().default('PENDING'), deliveryError: text('delivery_error'), bounceMessageId: text('bounce_message_id'),
+  deliveryCheckedAt: timestampMs('delivery_checked_at'), deliveryNextAt: timestampMs('delivery_next_at'), deliveryPageToken: text('delivery_page_token'), deliveryBefore: timestampMs('delivery_before'), deliveryIncomplete: boolean('delivery_incomplete').notNull().default(false),
+  deliveryLockToken: text('delivery_lock_token'), deliveryLockUntil: timestampMs('delivery_lock_until'),
+  createdAt: timestampMs('created_at').notNull(), updatedAt: timestampMs('updated_at').notNull(),
+}, t => [index('idx_document_items_batch').on(t.ownerId, t.batchId), index('idx_document_items_hash').on(t.ownerId, t.contentHash), index('idx_document_items_delivery').on(t.sendStatus, t.deliveryNextAt)]);
+export const documentSendDeliveryEvents = pgTable('document_send_delivery_events', {
+  id: serial('id').primaryKey(), itemId: text('item_id').notNull().references(() => documentSendItems.id), ownerId: text('owner_id').notNull(),
+  gmailMessageId: text('gmail_message_id').notNull(), status: text('status').notNull(), category: text('category').notNull(), diagnostic: text('diagnostic'), createdAt: timestampMs('created_at').notNull(),
+}, t => [uniqueIndex('uq_smart_delivery_event').on(t.itemId, t.gmailMessageId)]);
+
 export const companies = pgTable("companies", { id: serial("id").primaryKey(), ownerId: text("owner_id").notNull(), name: text("name").notNull(), tradeName: text("trade_name"), cnpj: text("cnpj"), website: text("website"), segment: text("segment"), region: integer("region"), city: text("city"), state: text("state"), address: text("address"), phone: text("phone"), phoneWhatsAppStatus: text("phone_whatsapp_status").notNull().default("UNKNOWN"), mobile: text("mobile"), mobileWhatsAppStatus: text("mobile_whatsapp_status").notNull().default("UNKNOWN"), primaryEmail: text("primary_email"), primaryEmailStatus: text("primary_email_status").notNull().default("UNKNOWN"), primaryEmailStatusReason: text("primary_email_status_reason"), primaryEmailStatusUpdatedAt: timestampMs("primary_email_status_updated_at"), employeeCount: integer("employee_count"), employeeRange: text("employee_range"), companySize: text("company_size"), notes: text("notes"), status: text("status").notNull().default("NOT_CONTACTED"), lastContactAt: timestampMs("last_contact_at"), nextFollowUpAt: timestampMs("next_follow_up_at"), createdAt: timestampMs("created_at").notNull(), updatedAt: timestampMs("updated_at").notNull() }, table => [index("idx_companies_owner_status").on(table.ownerId, table.status), index("idx_companies_owner_region_city").on(table.ownerId, table.region, table.city), index("idx_companies_owner_email").on(table.ownerId, table.primaryEmail), index("idx_companies_owner_email_status").on(table.ownerId, table.primaryEmailStatus), uniqueIndex("uq_companies_owner_cnpj").on(table.ownerId, table.cnpj)]);
 export const contacts = pgTable("contacts", { id: serial("id").primaryKey(), companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }), name: text("name"), email: text("email"), phone: text("phone"), role: text("role"), isPrimary: boolean("is_primary").notNull().default(false), createdAt: timestampMs("created_at").notNull() });
 export const emailTemplates = pgTable("email_templates", { id: serial("id").primaryKey(), ownerId: text("owner_id").notNull(), name: text("name").notNull(), subject: text("subject").notNull(), body: text("body").notNull(), createdAt: timestampMs("created_at").notNull(), updatedAt: timestampMs("updated_at").notNull() });

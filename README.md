@@ -2,6 +2,10 @@
 
 CRM para organizar empresas, contatos, campanhas de e-mail e follow-ups.
 
+## Envios Inteligentes
+
+Importação de PDFs, identificação local por CNPJ, revisão obrigatória e fila independente de e-mails por documento. Antes de disponibilizar, aplicar a migração `20261008000000_smart_sends.sql`, criar bucket privado e configurar Cloudflare Access. Consulte [implantação, limites, autenticação e testes](docs/smart-sends.md) e a [auditoria prévia](docs/smart-sends-audit.md). O módulo não envia após upload; requer confirmação explícita.
+
 ## Requisitos
 
 - Node.js 22.13 ou superior

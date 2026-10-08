@@ -5,11 +5,14 @@ import ts from "typescript";
 const compiled = ts.transpileModule(readFileSync(new URL('../worker.ts', import.meta.url), 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
 }).outputText;
-function loadWorker({ fetch, cleanup, findDue, processCampaign, delivery } = {}) {
+function loadWorker({ fetch, cleanup, findDue, processCampaign, delivery, findSmart, processSmart, cleanSmart, smartDelivery } = {}) {
   const logs = [], loadedModule = { exports: {} };
   const require = name => {
     if (name === 'vinext/server/fetch-handler') return { fetch };
     if (name === './lib/gmail-delivery') return { processPendingDeliveryChecks: delivery };
+    if (name === './lib/smart-send-runner') return { findDueSmartBatch: findSmart, processSmartBatch: processSmart };
+    if (name === './lib/smart-send-service') return { cleanupSmartFiles: cleanSmart };
+    if (name === './lib/smart-send-delivery') return { checkSmartDelivery: smartDelivery };
     if (name === './db') return { withCampaignDb: fn => fn() };
     if (name === './lib/attachment-service') return { cleanupAttachments: cleanup };
     if (name === './lib/campaign-runner') return { findDueCampaigns: findDue, processCampaignBatch: processCampaign };
@@ -58,4 +61,10 @@ test('empty campaign schedule does not send or clean attachments', async () => {
 test('delivery cron has its own bounded invocation and never sends or cleans attachments', async () => {
  let calls=0; const {worker}=loadWorker({delivery:async()=>{calls++;return {outcome:'checked'}},findDue:()=>assert.fail('must not send'),cleanup:()=>assert.fail('must not mix budgets')});
  await worker.scheduled({...event,cron:'*/2 * * * *'}); assert.equal(calls,1);
+});
+test('smart crons have isolated budgets and preserve traditional schedules', async () => {
+ const calls=[];
+ const {worker}=loadWorker({findSmart:async()=>({id:9,ownerId:'owner'}),processSmart:async(...args)=>calls.push(args),cleanSmart:async()=>({deleted:0}),smartDelivery:async()=>({outcome:'idle'}),findDue:()=>assert.fail('mixed campaigns'),cleanup:()=>assert.fail('mixed cleanup')});
+ await worker.scheduled({...event,cron:'1-59/2 * * * *'});assert.deepEqual(calls,[['owner',9]]);
+ await worker.scheduled({...event,cron:'3-59/5 * * * *'});await worker.scheduled({...event,cron:'2-59/3 * * * *'});
 });

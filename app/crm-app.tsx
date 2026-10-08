@@ -49,6 +49,7 @@ import { ImportPage } from "./import-page";
 import { TemplatesPage } from "./templates-page";
 import { EmailsPage } from "./emails-page";
 import { BatchEmailsPage } from "./batch-emails-page";
+import { SmartSendsPage } from "./smart-sends-page";
 import { FollowUpsPage } from "./followups-page";
 import { ContactsPage } from "./contacts-page";
 import { SettingsPage } from "./settings-page";
@@ -71,6 +72,7 @@ type View =
   | "contacts"
   | "emails"
   | "batch"
+  | "smart-sends"
   | "templates"
   | "imports"
   | "followups"
@@ -81,6 +83,7 @@ const nav = [
   ["contacts", "Contatos", ContactRound],
   ["emails", "E-mails", Mail],
   ["batch", "Envio em lote", Send],
+  ["smart-sends", "Envios Inteligentes", FileUp],
   ["templates", "Templates", Sparkles],
   ["imports", "Importações", FileUp],
   ["followups", "Follow-ups", CalendarClock],
@@ -229,7 +232,7 @@ export function CrmApp() {
             </button>
           ))}
         </nav>
-        {view !== "settings" && view !== "batch" && <div className="crm-sidebar-create" hidden={view === "companies"}>
+        {view !== "settings" && view !== "batch" && view !== "smart-sends" && <div className="crm-sidebar-create" hidden={view === "companies"}>
           <CompanyDialog
             open={dialogOpen}
             onOpenChange={setDialogOpen}
@@ -664,6 +667,7 @@ function ComingSoon({
   onCompanies: () => void;
 }) {
   if (view === "batch") return <BatchEmailsPage />;
+  if (view === "smart-sends") return <SmartSendsPage />;
   if (view === "followups") return <FollowUpsPage />;
   if (view === "contacts") return <ContactsPage />;
 

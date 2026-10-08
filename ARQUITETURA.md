@@ -1,5 +1,11 @@
 # Arquitetura do CRM Prospecta
 
+## Envios Inteligentes (08/10/2026)
+
+Módulo aditivo com tabelas document_send_*, parser PDF local, APIs verificadas por JWT Cloudflare Access, revisão persistente e runner independente. Compartilha leases/cota diária com campanhas e envio individual; reutiliza Gmail MIME/OAuth e parser DSN. Crons independentes preservam os orçamentos das campanhas. Consulte [arquitetura operacional e implantação](docs/smart-sends.md).
+
+Correção à descrição histórica de identidade: as rotas legadas usam `local-preview-user`; não existe autenticação central implementada. O módulo novo exige Access em hospedagem e mapa explícito de operador/proprietário. A aplicação legada continua sendo um workspace único.
+
 ## Monitoramento de devoluções Gmail
 
 O runtime atual é Vinext/Cloudflare Worker com Drizzle e PostgreSQL no Supabase (`db/index.ts`). O envio em lote mantém seus leases por proprietário/campanha, barreira de envio, retries e sincronização de contadores. Após `COMPLETED`, `lib/gmail-delivery.ts` reconcilia devoluções em um cron independente, sem chamar o runner nem mudar `SENT`/`UNCERTAIN`.

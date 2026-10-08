@@ -17,6 +17,19 @@ export default {
           const due = await findDueCampaigns(1);
           for (const campaign of due) await processCampaignBatch(campaign.ownerId, Number(campaign.id));
           console.info({ ...event, status: "completed", campaignsChecked: due.length, durationMs: Date.now() - startedAt });
+        } else if (controller.cron === "1-59/2 * * * *") {
+          const { findDueSmartBatch, processSmartBatch } = await import("./lib/smart-send-runner");
+          const batch = await findDueSmartBatch();
+          if (batch) await processSmartBatch(batch.ownerId, batch.id);
+          console.info({ ...event, status: "completed", smartBatches: batch ? 1 : 0 });
+        } else if (controller.cron === "3-59/5 * * * *") {
+          const { cleanupSmartFiles } = await import("./lib/smart-send-service");
+          const cleanup = await cleanupSmartFiles();
+          console.info({ ...event, status: "completed", ...cleanup });
+        } else if (controller.cron === "2-59/3 * * * *") {
+          const { checkSmartDelivery } = await import("./lib/smart-send-delivery");
+          const result = await checkSmartDelivery();
+          console.info({ ...event, status: "completed", ...result });
         } else if (controller.cron === "*/2 * * * *") {
           const { processPendingDeliveryChecks } = await import("./lib/gmail-delivery");
           const delivery = await processPendingDeliveryChecks();

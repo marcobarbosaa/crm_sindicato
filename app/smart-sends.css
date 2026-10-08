@@ -1,0 +1,30 @@
+.smart-sends { display: grid; gap: 20px; min-width: 0; }
+.smart-sends .smart-panel { padding: 24px; min-width: 0; }
+.smart-sends .smart-heading, .smart-sends .smart-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+.smart-sends h2 { font-size: 18px; font-weight: 650; }.smart-sends h3 { font-weight: 650; }
+.smart-sends p, .smart-sends small { color: #64748b; }.smart-sends small { display: block; font-size: 12px; margin-top: 4px; }
+.smart-sends label { display: grid; gap: 7px; font-size: 13px; margin-bottom: 14px; }
+.smart-sends select, .smart-sends input:not([type=checkbox]):not([type=file]) { padding: 10px 12px; border: 1px solid #dce2e9; border-radius: 8px; background: white; width: 100%; color: #172033; }
+.smart-sends :focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
+.smart-sends .smart-steps { display: flex; gap: 12px; list-style: none; padding: 0; flex-wrap: wrap; }
+.smart-sends .smart-steps li { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #64748b; flex: 1; min-width: 125px; }
+.smart-sends .smart-steps span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #e8edf3; }
+.smart-sends .smart-steps .current { font-weight: 700; color: #1d4ed8; }.smart-sends .smart-steps .current span { background: #dbeafe; }.smart-sends .smart-steps .done span { background: #dcfce7; color: #166534; }
+.smart-sends .smart-drop { display: grid; justify-items: center; gap: 8px; padding: 32px 16px; border: 2px dashed #ccd6e4; border-radius: 12px; background: #f8fafc; text-align: center; }
+.smart-sends .smart-drop.drag { background: #eff6ff; border-color: #2563eb; }.smart-sends .smart-drop { position: relative; }.smart-sends .smart-drop > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }.smart-sends .smart-drop label { margin: 0; background: #2563eb; color: white; border-radius: 8px; padding: 10px 16px; cursor: pointer; }.smart-sends .smart-drop:focus-within { outline: 3px solid #2563eb; outline-offset: 3px; }.smart-sends .smart-file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }.smart-sends .smart-file-input:disabled + label { opacity: .6; cursor: wait; }
+.smart-sends .smart-empty { display: grid; justify-items: center; gap: 12px; text-align: center; padding: 40px 15px; }
+.smart-sends .smart-upload-list { padding: 12px 0; list-style: none; }.smart-sends .smart-upload-list li { display: grid; gap: 5px; margin-bottom: 10px; }
+.smart-sends progress { accent-color: #2563eb; width: 100%; height: 9px; }
+.smart-sends .smart-table-wrap { overflow-x: auto; margin-top: 22px; }.smart-sends table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.smart-sends caption { text-align: left; font-weight: 650; padding: 10px 0; }.smart-sends th { background: #f8fafc; text-align: left; white-space: nowrap; }.smart-sends td, .smart-sends th { padding: 14px 12px; border-bottom: 1px solid #e8edf3; vertical-align: top; }.smart-sends td { min-width: 145px; overflow-wrap: anywhere; }.smart-sends td:first-child { min-width: 210px; }
+.smart-sends a { color: #1d4ed8; text-decoration: underline; }.smart-sends .excluded { background: #f8fafc; }
+.smart-sends .smart-status { display: inline-block; padding: 4px 8px; border-radius: 6px; background: #fff7ed; color: #9a3412; font-size: 12px; }.smart-sends .smart-status.ok { background: #ecfdf5; color: #065f46; }
+.smart-sends .smart-row-actions { display: grid; gap: 10px; min-width: 185px; }.smart-sends .smart-row-actions label { display: flex; gap: 6px; margin: 0; }
+.smart-sends .smart-associate label { display: grid; margin-top: 10px; }
+.smart-sends .smart-associate summary { cursor: pointer; color: #1d4ed8; }.smart-sends .smart-associate ul { padding: 0; list-style: none; max-height: 220px; overflow: auto; }.smart-sends .smart-associate li button { padding: 10px; text-align: left; width: 100%; border-bottom: 1px solid #e8edf3; }
+.smart-sends .smart-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin: 16px 0; }.smart-sends .smart-stats div { background: #f8fafc; padding: 12px; border-radius: 9px; font-size: 12px; color: #64748b; }.smart-sends .smart-stats strong { display: block; color: #172033; font-size: 24px; }
+.smart-sends .smart-final { border-top: 1px solid #e8edf3; margin-top: 24px; padding-top: 24px; display: grid; gap: 16px; }
+.smart-sends .smart-check { display: flex; align-items: flex-start; gap: 9px; line-height: 1.6; }.smart-sends input[type=checkbox] { margin-top: 4px; }
+.smart-sends .smart-message { background: #f8fafc; border: 1px solid #e8edf3; border-radius: 10px; padding: 20px; }.smart-sends pre { white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.65; margin-top: 14px; overflow-wrap: anywhere; }
+.smart-sends .smart-error { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px; background: #fff1f2; color: #9f1239; border-radius: 10px; }.smart-sends .smart-notice { padding: 12px; background: #fff7ed; }
+@media (max-width: 640px) { .smart-sends .smart-panel { padding: 16px; }.smart-sends .smart-steps { gap: 8px; }.smart-sends .smart-steps li { min-width: 95px; font-size: 11px; }.smart-sends .smart-error { flex-direction: column; align-items: flex-start; } }

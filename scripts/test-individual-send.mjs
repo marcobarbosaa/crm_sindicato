@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import ts from 'typescript';
@@ -7,16 +7,18 @@ function fixture(options={}) {
  const logs=[],calls=[],cache=new Map();
  const scope='https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly';
  const state={crmSettings:[],emailMessages:[],emailAccounts:[{id:1,ownerId:'local-preview-user',provider:'GMAIL',email:'sender@example.test',scopes:scope,encryptedRefreshToken:'encrypted',needsReconnect:options.needsReconnect||false}],companies:[],emailTemplates:options.template?[{id:1,ownerId:"local-preview-user"}]:[],activityLogs:[],templateAttachments:options.rows||[],oauthStates:[{state:'state',ownerId:'local-preview-user',expiresAt:new Date(Date.now()+60000)}]};
+ state.campaignOwnerLeases=[];
  const schema=Object.fromEntries(Object.keys(state).map(t=>[t,new Proxy({table:t},{get:(o,k)=>k==='table'?t:k})]));
  class Query {
   constructor(kind,table,projection){Object.assign(this,{kind,table,projection});}
   from(t){this.table=t;return this;} where(p){this.p=p;return this;} orderBy(){return this;} limit(){return this;} for(){return this;} returning(){return this;}
   values(data){this.data=data;return this;} set(data){this.data=data;return this;}
+  onConflictDoUpdate(conflict){this.conflict=conflict;return this;}
   then(resolve,reject){return Promise.resolve().then(()=>{
    const t=this.table.table;calls.push(this.kind+':'+t);
    if(options.databaseFailure===t)throw Object.assign(new Error('private-db-password'),{code:'42P01'});
    let rows=state[t].filter(r=>!this.p||this.p(r));
-   if(this.kind==='insert'){const r={id:state[t].length+1,...this.data};state[t].push(r);return [r];}
+   if(this.kind==='insert'){if(this.conflict){const old=state[t].find(r=>r[this.conflict.target]===this.data[this.conflict.target]);if(old){if(!this.conflict.setWhere(old))return [];Object.assign(old,this.conflict.set);return [old];}}const r={id:state[t].length+1,...this.data};state[t].push(r);return [r];}
    if(this.kind==='update'){if(options.persistFailure&&t==='emailMessages'&&this.data.status==='SENT')throw new Error('private-db-password');rows.forEach(r=>Object.assign(r,this.data));}
    if(this.kind==='delete')state[t]=state[t].filter(r=>!rows.includes(r));
    if(this.projection?.total)return [{total:0}];
@@ -25,6 +27,8 @@ function fixture(options={}) {
  }
  const db={select:p=>new Query('select',null,p),insert:t=>new Query('insert',t),update:t=>new Query('update',t),delete:t=>new Query('delete',t),transaction:async cb=>{calls.push('transaction');if(options.transactionFailure)throw Object.assign(new Error('private-db-password'),{code:'CONNECT_TIMEOUT'});return cb(db);}};
  const orm={eq:(a,b)=>r=>r[a]===b,and:(...p)=>r=>p.every(f=>f(r)),gt:()=>()=>true,gte:()=>()=>true,desc:x=>x,asc:x=>x,inArray:(k,vs)=>r=>vs.includes(r[k]),sql:()=>0};
+ orm.lte=(key,value)=>row=>row[key]<=value;
+ orm.or=(...predicates)=>row=>predicates.some(p=>p(row));
  const fetch=async(url,init)=>{
   calls.push(url);
   assert.equal(init?.redirect,"manual","credential-bearing fetch must not follow redirects");
@@ -43,7 +47,7 @@ function fixture(options={}) {
   if(cache.has(path))return cache.get(path);
   if(!code.has(path))code.set(path,ts.transpileModule(readFileSync(new URL('../'+path+'.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText);
   const m={exports:{}};cache.set(path,m.exports);
-  const require=name=>name==='next/server'?{NextResponse:{json:(data,init)=>Response.json(data,init),redirect:url=>new Response(null,{status:307,headers:{location:String(url)}})}}:name==='drizzle-orm'?orm:name==='@/db'?{getDb:()=>db}:name==='@/db/schema'?schema:name==='cloudflare:workers'?{env:options.noStorage?{}:{SUPABASE_URL:'https://storage.test',SUPABASE_SERVICE_ROLE_KEY:'private-storage-secret',SUPABASE_ATTACHMENTS_BUCKET:'bucket'}}:name==='@/lib/settings'?{sendingDayWindow:()=>({start:new Date(0)})}:load(name.startsWith('@/')?name.slice(2):'lib/'+name.replace('./',''));
+  const require=name=>name==='next/server'?{NextResponse:{json:(data,init)=>Response.json(data,init),redirect:url=>new Response(null,{status:307,headers:{location:String(url)}})}}:name==='drizzle-orm'?orm:name==='@/db'?{getDb:()=>db}:name==='@/db/schema'?schema:name==='cloudflare:workers'?{env:options.noStorage?{}:{SUPABASE_URL:'https://storage.test',SUPABASE_SERVICE_ROLE_KEY:'private-storage-secret',SUPABASE_ATTACHMENTS_BUCKET:'bucket'}}:name==='@/lib/settings'?{sendingDayWindow:()=>({start:new Date(0),next:new Date(8640000000000000)})}:load(name.startsWith('@/')?name.slice(2):'lib/'+name.replace('./',''));
   new Function('module','exports','require','fetch','process','console',code.get(path))(m,m.exports,require,fetch,{env:{GOOGLE_CLIENT_ID:'client',GOOGLE_CLIENT_SECRET:'private-client-secret',TOKEN_ENCRYPTION_KEY:'private-encryption-key'}},{info:x=>logs.push(x),error:x=>logs.push(x)});
   return m.exports;
  }

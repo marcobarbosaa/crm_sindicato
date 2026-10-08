@@ -1,7 +1,7 @@
 import { SendFailure, databaseFailure } from "./send-diagnostics";
-import { and, eq, inArray, isNull, lte, asc, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, asc, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { templateAttachments } from "@/db/schema";
+import { templateAttachments, documentSendBatches } from "@/db/schema";
 import { ATTACHMENT_LIMITS, AttachmentError, attachmentIds, validateAttachmentSet, type Attachment } from "./attachments";
 import { attachmentStorage } from "./attachment-storage";
 export type AttachmentRow = typeof templateAttachments.$inferSelect;
@@ -71,16 +71,26 @@ export async function loadSendAttachments(owner: string, value: unknown, templat
 export async function cleanupAttachments() {
   const storage = attachmentStorage();
   return getDb().transaction(async tx => {
-    const expired = await tx.select().from(templateAttachments).where(and(isNull(templateAttachments.templateId), lte(templateAttachments.expiresAt, new Date()))).orderBy(asc(templateAttachments.id)).limit(25).for("update", { skipLocked: true });
-    let deleted = 0;
+    const expired = await tx.select().from(templateAttachments).where(and(isNull(templateAttachments.templateId), lte(templateAttachments.expiresAt, new Date()),
+      sql`not exists (select 1 from ${documentSendBatches} where ${documentSendBatches.ownerId} = ${templateAttachments.ownerId}
+        and ${documentSendBatches.status} in ('READY','RUNNING','PAUSED') and ${documentSendBatches.commonAttachments} @> jsonb_build_array(jsonb_build_object('id', ${templateAttachments.id})))`
+    )).orderBy(asc(templateAttachments.id)).limit(25).for("update", { skipLocked: true });
+    let deleted = 0, retained = 0;
     for (const row of expired) {
       try {
+        // Fresh check after acquiring the attachment lock: a concurrent smart
+        // confirmation may have pinned this exact file while cleanup waited.
+        const [pinned] = await tx.select({ id: documentSendBatches.id }).from(documentSendBatches).where(and(
+          eq(documentSendBatches.ownerId, row.ownerId), inArray(documentSendBatches.status, ['READY', 'RUNNING', 'PAUSED']),
+          sql`${documentSendBatches.commonAttachments} @> ${JSON.stringify([{ id: row.id }])}::jsonb`,
+        )).limit(1);
+        if (pinned) { retained++; continue; }
         await storage.remove(row.storageKey);
         await tx.delete(templateAttachments).where(eq(templateAttachments.id, row.id));
         deleted++;
       } catch { /* Keep the record for a later retry. */ }
     }
-    return { deleted, pending: expired.length - deleted };
+    return { deleted, pending: expired.length - deleted - retained };
   });
 }
 
