@@ -2,6 +2,8 @@ j# Monitoramento de devoluções do Gmail
 
 ## Envio e entrega são resultados diferentes
 
+**Atualização de agendamento (08/10/2026):** o monitor tradicional agora ocupa um slot exclusivo de manutenção a cada oito minutos. As referências históricas abaixo ao cron de dois minutos foram substituídas pela [rotação compatível com Workers Free](cloudflare-cron-deploy.md). As regras de correlação, checkpoints e janelas permanecem iguais.
+
 O runner continua enviando pela API Gmail com leases, barreira `PREPARED → SENDING`, quotas e recuperação conservadora. Uma resposta aceita continua resultando em `email_messages.status = SENT` e `email_campaign_recipients.status = SENT`. `COMPLETED` encerra o processamento dos envios, sem esperar a análise de devoluções.
 
 O único acréscimo ao runner é um `Message-ID` RFC aleatório, validado contra CRLF, persistido junto da conta/endereço remetente antes do envio. O `providerMessageId` do Gmail continua sendo persistido nas mesmas transações. Estes dois identificadores são diferentes.

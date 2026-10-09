@@ -8,6 +8,8 @@ Correção à descrição histórica de identidade: as rotas legadas usam `local
 
 ## Monitoramento de devoluções Gmail
 
+Agendamento atualizado: três Cron Triggers; envios mantêm suas frequências e as quatro tarefas de manutenção alternam em eventos separados, cada uma a cada oito minutos. Veja [correção Workers Free](docs/cloudflare-cron-deploy.md).
+
 O runtime atual é Vinext/Cloudflare Worker com Drizzle e PostgreSQL no Supabase (`db/index.ts`). O envio em lote mantém seus leases por proprietário/campanha, barreira de envio, retries e sincronização de contadores. Após `COMPLETED`, `lib/gmail-delivery.ts` reconcilia devoluções em um cron independente, sem chamar o runner nem mudar `SENT`/`UNCERTAIN`.
 
 `lib/delivery-parser.ts` interpreta DSN MIME limitado; `lib/delivery-policy.ts` concentra classificação e sanitização puras; `lib/gmail-delivery-client.ts` contém somente chamadas de leitura ao Google com timeout, streaming limitado e redirects desabilitados. A autorização acrescenta `gmail.readonly` sem substituir `gmail.send`; criptografia AES-GCM continua em `lib/gmail.ts`.

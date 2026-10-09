@@ -59,7 +59,7 @@ O runtime usa `DATABASE_URL` para conectar diretamente ao PostgreSQL do Supabase
 
 ## Limpeza automática de anexos
 
-O mesmo Worker executa a limpeza a cada 5 minutos via Cron Trigger nativo, configurado em `vite.config.ts`. O entrypoint `worker.ts` preserva o HTTP do Vinext e chama `cleanupAttachments()` diretamente no evento scheduled. O deploy registra o cron automaticamente.
+O mesmo Worker executa a limpeza a cada oito minutos no slot de manutenção alternada, configurado em `vite.config.ts`. O entrypoint `worker.ts` preserva o HTTP do Vinext e executa somente uma tarefa por evento scheduled. São três Cron Triggers no total; consulte [frequências, auditoria da conta e preservação de variáveis](docs/cloudflare-cron-deploy.md).
 
 Consulte [configuração, teste local e monitoramento](docs/email-attachments.md#cron-trigger-nativo-da-cloudflare). O endpoint POST protegido continua disponível para execução manual.
 
@@ -67,7 +67,7 @@ Consulte [configuração, teste local e monitoramento](docs/email-attachments.md
 
 O monitor de campanhas inclui **Resultado de entrega**, filtros e exportação CSV. Envios aceitos continuam `SENT`; uma devolução posterior tem resultado separado. “Sem falha conhecida” não comprova entrega.
 
-Antes do deploy, aplique `supabase/migrations/20261003000000_gmail_delivery.sql` após as migrações anteriores. Reconecte o Gmail em Configurações para conceder `gmail.readonly`, mantendo `gmail.send`. Contas antigas continuam enviando, mas precisam de reconexão para leitura. O novo cron independente roda a cada dois minutos e analisa campanhas novas concluídas durante uma janela de 24 horas, com paginação e limites conservadores.
+Antes do deploy, aplique `supabase/migrations/20261003000000_gmail_delivery.sql` após as migrações anteriores. Reconecte o Gmail em Configurações para conceder `gmail.readonly`, mantendo `gmail.send`. Contas antigas continuam enviando, mas precisam de reconexão para leitura. O slot de monitoramento roda a cada oito minutos e analisa campanhas novas concluídas durante uma janela de 24 horas, com paginação e limites conservadores.
 
 Endereços definitivamente inexistentes são marcados como inválidos e excluídos de campanhas futuras quando forem o destinatário efetivo. Nenhum endereço é apagado. Correções de endereço resetam o status; há revisão manual no perfil da empresa.
 

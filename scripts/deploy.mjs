@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { validateDeployConfig } from "./deploy-policy.mjs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -94,6 +95,8 @@ if (wranglerConfigs.length > 1) {
 
 // 4. Usa exatamente o wrangler.json produzido pelo build
 const wranglerConfig = wranglerConfigs[0];
+// Validate the generated production artifact before any remote mutation.
+validateDeployConfig(JSON.parse(readFileSync(wranglerConfig, "utf8")));
 
 console.log(`\nUsando configuração: ${wranglerConfig}\n`);
 
@@ -107,6 +110,7 @@ console.log(`Publicando explicitamente no Worker "${PRODUCTION_WORKER_NAME}".`);
 run(process.execPath, [
   "node_modules/wrangler/bin/wrangler.js",
   "deploy",
+  "--keep-vars",
   "--config",
   wranglerConfig,
   "--name",

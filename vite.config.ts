@@ -1,6 +1,7 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
+import { WORKER_CRONS } from "./lib/worker-schedule";
 
 const managedLinux = readExecutionProfile() === "managed-linux";
 const isCloudflareDeploy = process.env.CLOUDFLARE_DEPLOY === "1";
@@ -10,7 +11,8 @@ const workerVars: Record<string, string> = isCloudflareDeploy
 
 const localBindingConfig = {
   main: "./worker.ts",
-  triggers: { crons: ["* * * * *", "*/5 * * * *", "*/2 * * * *", "1-59/2 * * * *", "3-59/5 * * * *", "2-59/3 * * * *"] },
+  triggers: { crons: WORKER_CRONS },
+  keep_vars: true,
   observability: { enabled: true },
   compatibility_flags: ["nodejs_compat"],
   vars: workerVars,

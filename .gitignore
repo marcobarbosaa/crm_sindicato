@@ -54,3 +54,4 @@ next-env.d.ts
 !/docs/gmail-delivery-monitoring.md
 !/docs/smart-sends-audit.md
 !/docs/smart-sends.md
+!/docs/cloudflare-cron-deploy.md

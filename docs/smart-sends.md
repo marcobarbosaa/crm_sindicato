@@ -19,7 +19,7 @@ Nenhuma etapa abaixo foi executada em produção.
 3. Criar no Supabase Storage um bucket **privado**, por exemplo `crm-smart-documents`, permitindo somente `application/pdf`, com teto de 8 MiB. Não criar políticas públicas de leitura. Definir `SMART_SEND_BUCKET`. O código verifica que o bucket não é público antes de gravar/ler.
 4. Configurar autenticação conforme a seção abaixo. Manter secrets Supabase/Gmail já existentes; nenhuma permissão OAuth adicional é introduzida.
 5. Executar testes, TypeScript, lint e build. Publicar manualmente usando o procedimento Worker/Vinext do README somente após aprovação operacional.
-6. Conferir os seis Cron Triggers gerados em `dist/server/wrangler.json`, as variáveis no Worker e os logs de manutenção. Agendamento é parte do mesmo Worker; não depende de manter o navegador aberto.
+6. Conferir os três Cron Triggers gerados em `dist/server/wrangler.json`, `keep_vars: true`, as variáveis no Worker e os logs de manutenção. Agendamento é parte do mesmo Worker; não depende de manter o navegador aberto. Consulte a [correção para Workers Free](cloudflare-cron-deploy.md).
 7. Em homologação, conferir acesso, upload, revisão e recuperação usando empresas/documentos fictícios. O primeiro envio real exige autorização específica. Validar limites de CPU/memória e permissões da conta Cloudflare no plano efetivo antes de lotes grandes.
 
 `supabase/schema.sql` é um consolidado legado e não substitui a nova migração. Há BOMs internos nesse consolidado; a suíte SQL remove esses caracteres somente ao lê-lo para montar o banco de teste. A nova migração não possui BOM.
@@ -59,16 +59,13 @@ Valores não inteiros/positivos retornam ao padrão; valores acima do teto são 
 
 Upload e análise são sequenciais no navegador e um PDF por requisição no Worker. Preparação usa consultas em conjunto e UPDATE de snapshots em lote, evitando uma chamada de banco por documento. O runner processa **uma mensagem por invocação**, com download limitado por arquivo, MIME em memória e timeout de 30s no Gmail. O parser [unpdf](https://github.com/unjs/unpdf) usa PDF.js adaptado para Workers. Nenhum conteúdo é encaminhado a serviços de OCR ou análise externos.
 
-Crons independentes:
+Crons de envio e manutenção alternada (Workers Free):
 
 | Cron | Trabalho |
 | --- | --- |
 | `* * * * *` | Campanhas tradicionais, preservado |
-| `*/5 * * * *` | Limpeza de anexos tradicionais, preservado |
-| `*/2 * * * *` | Devoluções de campanhas, preservado |
 | `1-59/2 * * * *` | Um envio inteligente a cada execução |
-| `3-59/5 * * * *` | Até cinco PDFs expirados |
-| `2-59/3 * * * *` | Uma página de monitoramento de um envio |
+| `*/2 * * * *` | Alterna devoluções tradicionais, devoluções inteligentes, limpeza de anexos e limpeza de PDFs; uma tarefa por evento, cada tarefa a cada oito minutos |
 
 A cadência efetiva padrão é até uma mensagem a cada dois minutos, respeitando o intervalo mínimo, a cota diária e a disponibilidade do lease. Campanhas podem adiar Envios Inteligentes ao ocupar a conta. A janela diária segue o timezone configurado no CRM. Os crons têm orçamentos separados de subrequests.
 
