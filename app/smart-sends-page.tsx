@@ -5,11 +5,11 @@ import { Button } from '@/components/ui/button';
 import { formatFileSize, type Attachment } from '@/lib/attachments';
 import { SMART_DEFAULTS, validateSmartFile, type SmartLimits } from '@/lib/smart-send-policy';
 import { toast } from 'sonner';
-type Item = { id: string; fileName: string; fileSize: number; fileReady: boolean; fileDeletedAt: string | null; readable: boolean; companyId: number | null; companyName: string | null; companyCnpj: string | null; recipient: string | null; extractedCnpjs: string[]; candidates: number[]; suggestions?: { id: number; name: string; primaryEmail: string | null }[]; identificationMethod: string; reviewStatus: string; sendStatus: string; deliveryStatus: string; error: string | null; deliveryError: string | null; excluded: boolean; subject: string | null; body: string | null };
+type Item = { id: string; fileName: string; fileSize: number; fileReady: boolean; fileDeletedAt: string | null; readable: boolean; companyId: number | null; companyName: string | null; companyCnpj: string | null; recipient: string | null; extractedCnpjs: string[]; candidates: number[]; suggestions?: { id: number | string; name: string; primaryEmail: string | null }[]; identificationMethod: string; reviewStatus: string; sendStatus: string; deliveryStatus: string; error: string | null; deliveryError: string | null; excluded: boolean; subject: string | null; body: string | null };
 type Batch = { id: number; name: string; status: string; revision: number; templateName: string | null; senderAddress: string | null; commonAttachments: Attachment[]; intervalSeconds: number; notice: string | null };
 type Detail = { batch: Batch; items: Item[]; limits: SmartLimits; dailyLimit: number; sender: string | null; summary: { documents: number; companies: number; eligible: number; blocked: number; duplicates: number; withoutEmail: number; excluded: number } };
 type Template = { id: number; name: string; attachments: Attachment[] };
-type Company = { id: number; name: string; primaryEmail: string | null; cnpj: string | null };
+type Company = { id: number | string; name: string; primaryEmail: string | null; cnpj: string | null };
 const readingErrors: Record<string, string> = { PDF_PASSWORD: 'PDF protegido por senha. Importe uma cópia desbloqueada.', PDF_CORRUPT: 'PDF corrompido ou incompatível.', PDF_NO_TEXT: 'Sem camada textual. Visualize o PDF e associe uma empresa manualmente.', PDF_PAGE_LIMIT: 'PDF excede o limite de páginas.', PDF_TEXT_LIMIT: 'PDF excede o limite de texto analisável.' };
 const labels: Record<string, string> = { DRAFT: 'Rascunho', READY: 'Pronto para envio', RUNNING: 'Em execução', PAUSED: 'Pausado', COMPLETED: 'Concluído', CANCELLED: 'Cancelado', IDENTIFIED: 'Identificado', REVIEW_REQUIRED: 'Revisão necessária', COMPANY_NOT_FOUND: 'Empresa não cadastrada', NO_EMAIL: 'Sem e-mail', INVALID_EMAIL: 'E-mail inválido', DUPLICATE: 'Documento duplicado', READ_ERROR: 'Erro de leitura', UPLOADING: 'Analisando', PENDING: 'Pendente', PROCESSING: 'Em processamento', SENT: 'Aceito pelo Gmail', FAILED: 'Falha', SKIPPED: 'Ignorado', UNCERTAIN: 'Resultado incerto', NO_KNOWN_FAILURE: 'Sem falha conhecida', BOUNCED: 'Devolvido', DELIVERY_DELAYED: 'Entrega adiada' };
 async function api<T>(path: string, body?: unknown, method = 'POST'): Promise<T> {
@@ -23,7 +23,18 @@ function CompanyPicker({ item, disabled, onChoose }: { item: Item; disabled: boo
     let active = true; const timer = setTimeout(() => { void api<Company[]>('/companies?search=' + encodeURIComponent(query)).then(data => { if (active) { setRows(data); setError(''); } }).catch(() => { if (active) setError('Falha na busca.'); }); }, 300);
     return () => { active = false; clearTimeout(timer); };
   }, [query]);
-  return <details className="smart-associate"><summary>Associar empresa</summary>{!!item.suggestions?.length && <ul aria-label="Sugestões de empresas">{item.suggestions.map(c => <li key={c.id}><button disabled={disabled} onClick={() => onChoose(c.id)}>{c.name}<small>{c.primaryEmail || "Sem e-mail"}</small></button></li>)}</ul>}<label>Buscar empresa para {item.fileName}<input disabled={disabled} value={query} onChange={e => { setQuery(e.target.value); setRows([]); }} placeholder="Nome ou CNPJ" /></label>{error && <p role="alert">{error}</p>}{query && <ul>{rows.map(c => <li key={c.id}><button disabled={disabled} onClick={() => { onChoose(c.id); setQuery(''); setRows([]); }}>{c.name}<small>{c.cnpj} · {c.primaryEmail || 'Sem e-mail'}</small></button></li>)}</ul>}</details>;
+  function chooseCompany(value: number | string) {
+    const id = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
+    if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) {
+      setError('Identificador de empresa inválido. Pesquise e selecione a empresa novamente.');
+      return;
+    }
+    setError('');
+    onChoose(id);
+    setQuery('');
+    setRows([]);
+  }
+  return <details className="smart-associate"><summary>Associar empresa</summary>{!!item.suggestions?.length && <ul aria-label="Sugestões de empresas">{item.suggestions.map(c => <li key={c.id}><button disabled={disabled} onClick={() => chooseCompany(c.id)}>{c.name}<small>{c.primaryEmail || "Sem e-mail"}</small></button></li>)}</ul>}<label>Buscar empresa para {item.fileName}<input disabled={disabled} value={query} onChange={e => { setQuery(e.target.value); setRows([]); }} placeholder="Nome ou CNPJ" /></label>{error && <p role="alert">{error}</p>}{query && <ul>{rows.map(c => <li key={c.id}><button disabled={disabled} onClick={() => chooseCompany(c.id)}>{c.name}<small>{c.cnpj} · {c.primaryEmail || 'Sem e-mail'}</small></button></li>)}</ul>}</details>;
 }
 export function SmartSendsPage() {
   const [history, setHistory] = useState<Batch[]>([]), [data, setData] = useState<Detail | null>(null), [templates, setTemplates] = useState<Template[]>([]);
