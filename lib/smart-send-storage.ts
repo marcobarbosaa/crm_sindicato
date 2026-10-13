@@ -26,12 +26,12 @@ export function smartStorage() {
     async put(key: string, bytes: Uint8Array) {
       await ensurePrivate();
       const r = await fetch(base + '/' + path(key), { method: 'POST', redirect: 'manual', headers: { ...headers, 'content-type': 'application/pdf', 'x-upsert': 'false' }, body: new Uint8Array(bytes), signal: AbortSignal.timeout(30_000) });
-      await r.body?.cancel(); if (!r.ok) throw new SmartSendError('Falha no upload. Remova o item e importe novamente.', 503);
+      await r.body?.cancel(); if (!r.ok) throw new SmartSendError('Armazenamento não confirmado. Reconcilie a importação antes de tentar recuperar.', 503);
     },
     async get(key: string) {
       await ensurePrivate();
       const r = await fetch(base + '/authenticated/' + path(key), { headers, redirect: 'manual', signal: AbortSignal.timeout(30_000) });
-      if (!r.ok) { await r.body?.cancel(); throw new SmartSendError('PDF indisponível no armazenamento.', 503); }
+      if (!r.ok) { await r.body?.cancel(); throw new SmartSendError('PDF indisponível no armazenamento.', r.status === 404 ? 404 : 503); }
       return boundedBytes(r.body, smartLimits(storageConfig).fileBytes);
     },
     async remove(key: string) {

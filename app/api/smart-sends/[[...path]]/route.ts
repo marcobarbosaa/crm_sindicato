@@ -8,7 +8,7 @@ import { boundedBytes, contentHash, smartStorage } from '@/lib/smart-send-storag
 import { SmartSendError, csvCell, smartLimits } from '@/lib/smart-send-policy';
 import { storageConfig } from '@/lib/attachment-storage';
 import { AttachmentError } from '@/lib/attachments';
-import { controlSmartBatch, getSmartBatch, ownedItems, prepareSmartBatch, reviewSmartItem, smartCatalog, uploadSmartPdf } from '@/lib/smart-send-service';
+import { controlSmartBatch, getSmartBatch, getSmartImportStatus, ownedItems, prepareSmartBatch, reviewSmartItem, smartCatalog, uploadSmartPdf } from '@/lib/smart-send-service';
 type Context = { params: Promise<{ path?: string[] }> };
 const idSchema = z.coerce.number().int().positive().safe();
 async function json(request: Request) { return JSON.parse(new TextDecoder().decode(await boundedBytes(request.body, 64 * 1024))) as unknown; }
@@ -31,6 +31,7 @@ async function handle(request: NextRequest, context: Context) {
       if (method === 'GET' && path.length === 1 && path[0] === 'companies') return response(await smartCatalog(owner, request.nextUrl.searchParams.get('search') || ''));
       const id = idSchema.parse(path[0]);
       if (method === 'GET' && path.length === 1) return response(await getSmartBatch(owner, id));
+      if (method === 'GET' && path.length === 2 && path[1] === 'import-status') return response(await getSmartImportStatus(owner, id));
       if (method === 'GET' && path.length === 2 && path[1] === 'report') {
         const data = await getSmartBatch(owner, id);
         const rows: unknown[][] = [['Documento', 'Empresa', 'CNPJ', 'Destinatário', 'Revisão', 'Envio', 'Resultado de entrega', 'Data', 'Erro'],
@@ -41,8 +42,10 @@ async function handle(request: NextRequest, context: Context) {
         const limit = smartLimits(storageConfig).fileBytes;
         if (Number(request.headers.get('content-length')) > limit) throw new SmartSendError('PDF excede o limite.', 413);
         const name = decodeURIComponent(request.headers.get('x-file-name') || '');
-        await uploadSmartPdf(owner, id, name, request.headers.get('content-type') || '', await boundedBytes(request.body, limit));
-        return response({ ok: true }, 201);
+        const uploadId = request.headers.get('x-upload-id');
+        if (uploadId) z.string().uuid().parse(uploadId);
+        const result = await uploadSmartPdf(owner, id, name, request.headers.get('content-type') || '', await boundedBytes(request.body, limit), uploadId || undefined, request.headers.get('x-recover-upload') === 'true');
+        return response({ ok: true, ...result }, 201);
       }
       if (path[1] === 'items' && path.length >= 3) {
         const itemId = z.string().uuid().parse(path[2]);
@@ -80,7 +83,7 @@ async function handle(request: NextRequest, context: Context) {
     });
   } catch (error) {
     const status = error instanceof SmartSendError ? error.status : error instanceof z.ZodError || error instanceof SyntaxError || error instanceof URIError || error instanceof AttachmentError ? 400 : 503;
-    return NextResponse.json({ error: error instanceof SmartSendError || error instanceof AttachmentError ? error.message : status === 400 ? 'Dados inválidos.' : 'Serviço indisponível. Verifique a configuração e tente novamente.' }, { status, headers: { 'cache-control': 'no-store' } });
+    return NextResponse.json({ code: status === 401 || status === 403 ? 'AUTH_REQUIRED' : status >= 500 ? 'SERVICE_UNAVAILABLE' : 'REQUEST_REJECTED', persistence: 'unknown', error: error instanceof SmartSendError || error instanceof AttachmentError ? error.message : status === 400 ? 'Dados inválidos.' : 'Serviço indisponível. Verifique a configuração e tente novamente.' }, { status, headers: { 'cache-control': 'no-store' } });
   }
 }
 export const GET = handle;

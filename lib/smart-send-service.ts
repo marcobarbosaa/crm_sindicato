@@ -9,6 +9,7 @@ import { contentHash, smartStorage } from './smart-send-storage';
 import { extractCnpjs, matchPdfCompany, normalizeName } from './pdf-company-matcher';
 import { readPdfText } from './pdf-text';
 import { GMAIL_SEND_SCOPE } from './gmail';
+import { importResult, IMPORT_LEASE_MS } from './smart-import-protocol';
 export const ownedBatch = (owner: string, id: number) => and(eq(batches.ownerId, owner), eq(batches.id, id));
 export const ownedItems = (owner: string, id: number) => and(eq(items.ownerId, owner), eq(items.batchId, id));
 export async function requireBatch(owner: string, id: number, tx: Transaction) {
@@ -46,14 +47,33 @@ export async function smartCatalog(owner: string, search?: string) {
   const attachments = await db.select().from(templateAttachments).where(and(eq(templateAttachments.ownerId, owner), eq(templateAttachments.ready, true)));
   return templates.map(t => ({ ...t, attachments: attachments.filter(a => a.templateId === t.id).map(attachmentMetadata) }));
 }
-export async function uploadSmartPdf(owner: string, batchId: number, name: string, mime: string, bytes: Uint8Array) {
+export async function getSmartImportStatus(owner: string, batchId: number) {
+  const db = getDb();
+  const [batch] = await db.select({ id: batches.id }).from(batches).where(ownedBatch(owner, batchId));
+  if (!batch) throw new SmartSendError('Lote não encontrado.', 404);
+  // No rendered emails, recipients, suggestions, storage keys or delivery metadata.
+  const rows = await db.select({ id: items.id, contentHash: items.contentHash, fileReady: items.fileReady,
+    fileDeletedAt: items.fileDeletedAt, removedAt: items.removedAt, duplicateOf: items.duplicateOf,
+    reviewStatus: items.reviewStatus, error: items.error }).from(items).where(ownedItems(owner, batchId));
+  return { batchId: Number(batch.id), items: rows.map(importResult) };
+}
+export async function uploadSmartPdf(owner: string, batchId: number, name: string, mime: string, bytes: Uint8Array, uploadId?: string, recover = false) {
   const limits = smartLimits(storageConfig); validateSmartFile({ name, type: mime, size: bytes.length }, limits);
   if (new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') throw new SmartSendError('Assinatura PDF inválida.');
-  const hash = await contentHash(bytes), id = crypto.randomUUID(), now = new Date(), db = getDb();
-  const row = await db.transaction(async tx => {
+  const hash = await contentHash(bytes), id = uploadId || crypto.randomUUID(), now = new Date(), db = getDb();
+  const reservation = await db.transaction(async tx => {
     const batch = await requireBatch(owner, batchId, tx); editable(batch);
     // Same content imported into different batches is serialized too.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${owner + ':' + hash}, 0))`);
+    const [existing] = await tx.select().from(items).where(eq(items.id, id));
+    if (existing) {
+      if (existing.ownerId !== owner || existing.batchId !== batchId || existing.contentHash !== hash) throw new SmartSendError('Identificador de importação incompatível.', 409);
+      if (!recover || !importResult(existing).recoverable || (existing.reviewStatus === 'UPLOADING' && +existing.updatedAt > Date.now() - IMPORT_LEASE_MS)) return { row: existing, process: false };
+      const [claimed] = await tx.update(items).set({ reviewStatus: 'UPLOADING', readable: false, confirmedAt: null, updatedAt: now }).where(eq(items.id, id)).returning();
+      await invalidate(tx, owner, batchId);
+      return { row: claimed, process: true };
+    }
+    if (recover) throw new SmartSendError('Registro de importação não encontrado. Reconcilie o lote.', 409);
     const [{ total }] = await tx.select({ total: sql<number>`count(*)` }).from(items).where(and(ownedItems(owner, batchId), isNull(items.removedAt)));
     if (Number(total) >= limits.batchFiles) throw new SmartSendError('Limite de documentos do lote atingido.');
     const [duplicate] = await tx.select({ id: items.id }).from(items).where(and(eq(items.ownerId, owner), eq(items.contentHash, hash), isNull(items.removedAt),
@@ -61,11 +81,28 @@ export async function uploadSmartPdf(owner: string, batchId: number, name: strin
     const [item] = await tx.insert(items).values({ id, ownerId: owner, batchId, fileName: name, fileSize: bytes.length, contentHash: hash,
       storageKey: `smart-sends/${id}.pdf`, rfcMessageId: `<${id}@smart.prospecta.invalid>`, duplicateOf: duplicate?.id || null,
       reviewStatus: duplicate ? 'DUPLICATE' : 'UPLOADING', error: duplicate ? 'Documento já importado ou enviado.' : null, createdAt: now, updatedAt: now }).returning();
-    await invalidate(tx, owner, batchId); return item;
+    await invalidate(tx, owner, batchId); return { row: item, process: !item.duplicateOf };
   });
-  if (row.duplicateOf) return;
+  const row = reservation.row;
+  if (!reservation.process) return importResult(row);
+  // updatedAt fences a slow original request after another request claims recovery.
+  const lease = and(ownedItems(owner, batchId), eq(items.id, id), eq(items.updatedAt, now), eq(items.reviewStatus, 'UPLOADING'), isNull(items.removedAt));
+  let stored = row.fileReady;
   try {
-    await smartStorage().put(row.storageKey, bytes);
+    if (recover) {
+      try {
+        const saved = await smartStorage().get(row.storageKey);
+        if (await contentHash(saved) !== hash) throw new SmartSendError('Integridade do PDF inválida.', 409);
+        stored = true;
+      } catch (error) {
+        if (!(error instanceof SmartSendError) || error.status !== 404) throw error;
+        stored = false;
+      }
+    }
+    if (!stored) await smartStorage().put(row.storageKey, bytes);
+    stored = true;
+    const persisted = await db.update(items).set({ fileReady: true }).where(lease).returning({ id: items.id });
+    if (!persisted.length) throw new SmartSendError('A importação está sendo recuperada por outra requisição.', 409);
     const reading = await readPdfText(bytes, limits), cnpjs = extractCnpjs(reading.text).map(c => c.cnpj);
     // Bounded owner-scoped lookup. Filename suggestions never imply approval.
     const words = normalizeName(name).split(' ').filter(w => w.length > 2).slice(0, 8);
@@ -75,16 +112,19 @@ export async function uploadSmartPdf(owner: string, batchId: number, name: strin
     const match = matchPdfCompany(reading.text, name, candidates), company = candidates.find(c => c.id === match.companyId);
     await db.transaction(async tx => {
       const batch = await requireBatch(owner, batchId, tx); editable(batch);
-      await tx.update(items).set({ fileReady: true, readable: reading.readable, extractedCnpjs: match.cnpjs, candidates: match.candidates,
+      const changed = await tx.update(items).set({ fileReady: true, readable: reading.readable, extractedCnpjs: match.cnpjs, candidates: match.candidates,
         companyId: company?.id || null, companyName: company?.name || null, companyCnpj: company?.cnpj || null, recipient: company?.primaryEmail?.trim().toLowerCase() || null,
         identificationMethod: match.method, reviewStatus: !reading.readable ? 'READ_ERROR' : company ? recipientReview(company) : match.status,
-        error: reading.error, updatedAt: new Date() }).where(and(eq(items.id, id), eq(items.ownerId, owner), isNull(items.removedAt)));
+        error: reading.error, updatedAt: new Date() }).where(lease).returning({ id: items.id });
+      if (!changed.length) throw new SmartSendError('A importação foi alterada. Reconcilie o lote.', 409);
       await invalidate(tx, owner, batchId);
     });
-  } catch (error) {
-    await db.update(items).set({ reviewStatus: 'READ_ERROR', error: 'Falha no upload ou na análise. Remova e importe novamente.', updatedAt: new Date() }).where(and(eq(items.id, id), eq(items.ownerId, owner)));
-    throw error;
+  } catch {
+    // Preserve proven storage state; never delete a record/object to hide a failure.
+    await db.update(items).set({ fileReady: stored, readable: false, reviewStatus: 'READ_ERROR', error: stored ? 'IMPORT_ANALYSIS_FAILED' : 'IMPORT_STORAGE_FAILED', updatedAt: new Date() }).where(lease);
   }
+  const [finished] = await db.select().from(items).where(and(ownedItems(owner, batchId), eq(items.id, id)));
+  return importResult(finished);
 }
 export async function reviewSmartItem(owner: string, batchId: number, id: string, input: { companyId?: number; confirm?: boolean; excluded?: boolean; remove?: boolean }) {
   return getDb().transaction(async tx => {

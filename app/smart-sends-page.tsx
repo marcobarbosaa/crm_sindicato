@@ -3,19 +3,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileUp, Plus, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatFileSize, type Attachment } from '@/lib/attachments';
-import { SMART_DEFAULTS, validateSmartFile, type SmartLimits } from '@/lib/smart-send-policy';
+import { type SmartLimits } from '@/lib/smart-send-policy';
+import { smartJson as api, identifyFile, importSnapshot, processImportQueue, restoreImportQueue, saveImportQueue, uploadPdf, type ImportEntry } from '@/lib/smart-import-client';
 import { toast } from 'sonner';
 type Item = { id: string; fileName: string; fileSize: number; fileReady: boolean; fileDeletedAt: string | null; readable: boolean; companyId: number | null; companyName: string | null; companyCnpj: string | null; recipient: string | null; extractedCnpjs: string[]; candidates: number[]; suggestions?: { id: number | string; name: string; primaryEmail: string | null }[]; identificationMethod: string; reviewStatus: string; sendStatus: string; deliveryStatus: string; error: string | null; deliveryError: string | null; excluded: boolean; subject: string | null; body: string | null };
 type Batch = { id: number; name: string; status: string; revision: number; templateName: string | null; senderAddress: string | null; commonAttachments: Attachment[]; intervalSeconds: number; notice: string | null };
 type Detail = { batch: Batch; items: Item[]; limits: SmartLimits; dailyLimit: number; sender: string | null; summary: { documents: number; companies: number; eligible: number; blocked: number; duplicates: number; withoutEmail: number; excluded: number } };
 type Template = { id: number; name: string; attachments: Attachment[] };
 type Company = { id: number | string; name: string; primaryEmail: string | null; cnpj: string | null };
-const readingErrors: Record<string, string> = { PDF_PASSWORD: 'PDF protegido por senha. Importe uma cópia desbloqueada.', PDF_CORRUPT: 'PDF corrompido ou incompatível.', PDF_NO_TEXT: 'Sem camada textual. Visualize o PDF e associe uma empresa manualmente.', PDF_PAGE_LIMIT: 'PDF excede o limite de páginas.', PDF_TEXT_LIMIT: 'PDF excede o limite de texto analisável.' };
+const readingErrors: Record<string, string> = { IMPORT_STORAGE_FAILED: 'Registro salvo; armazenamento não confirmado. Use Recuperar pendentes.', IMPORT_ANALYSIS_FAILED: 'PDF salvo; análise interrompida. Use Recuperar pendentes.', PDF_PASSWORD: 'PDF protegido por senha. Importe uma cópia desbloqueada.', PDF_CORRUPT: 'PDF corrompido ou incompatível.', PDF_NO_TEXT: 'Sem camada textual. Visualize o PDF e associe uma empresa manualmente.', PDF_PAGE_LIMIT: 'PDF excede o limite de páginas.', PDF_TEXT_LIMIT: 'PDF excede o limite de texto analisável.' };
 const labels: Record<string, string> = { DRAFT: 'Rascunho', READY: 'Pronto para envio', RUNNING: 'Em execução', PAUSED: 'Pausado', COMPLETED: 'Concluído', CANCELLED: 'Cancelado', IDENTIFIED: 'Identificado', REVIEW_REQUIRED: 'Revisão necessária', COMPANY_NOT_FOUND: 'Empresa não cadastrada', NO_EMAIL: 'Sem e-mail', INVALID_EMAIL: 'E-mail inválido', DUPLICATE: 'Documento duplicado', READ_ERROR: 'Erro de leitura', UPLOADING: 'Analisando', PENDING: 'Pendente', PROCESSING: 'Em processamento', SENT: 'Aceito pelo Gmail', FAILED: 'Falha', SKIPPED: 'Ignorado', UNCERTAIN: 'Resultado incerto', NO_KNOWN_FAILURE: 'Sem falha conhecida', BOUNCED: 'Devolvido', DELIVERY_DELAYED: 'Entrega adiada' };
-async function api<T>(path: string, body?: unknown, method = 'POST'): Promise<T> {
-  const r = await fetch('/api/smart-sends' + path, body === undefined ? { cache: 'no-store' } : { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const data = await r.json() as T & { error?: string }; if (!r.ok) throw new Error(data.error || 'Não foi possível concluir a operação.'); return data;
-}
 function CompanyPicker({ item, disabled, onChoose }: { item: Item; disabled: boolean; onChoose: (id: number) => void }) {
   const [query, setQuery] = useState(''), [rows, setRows] = useState<Company[]>([]), [error, setError] = useState('');
   useEffect(() => {
@@ -39,36 +36,48 @@ function CompanyPicker({ item, disabled, onChoose }: { item: Item; disabled: boo
 export function SmartSendsPage() {
   const [history, setHistory] = useState<Batch[]>([]), [data, setData] = useState<Detail | null>(null), [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState(''), [includeCommon, setIncludeCommon] = useState(false), [confirmed, setConfirmed] = useState(false);
-  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [loading, setLoading] = useState(true), [uploads, setUploads] = useState<{ name: string; size: number; progress: number; state: string }[]>([]);
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [loading, setLoading] = useState(true), [uploads, setUploads] = useState<ImportEntry[]>([]);
   const [preview, setPreview] = useState<string | null>(null), [drag, setDrag] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null), uploadGuard = useRef(false);
+  const selectedFiles = useRef(new Map<string, File>());
   const refresh = useCallback(async (id: number) => { const next = await api<Detail>('/' + id); setData(next); setHistory(rows => rows.map(row => row.id === next.batch.id ? next.batch : row)); return next; }, []);
   useEffect(() => { let active = true; Promise.all([api<Batch[]>(''), api<Template[]>('/templates')]).then(([b, t]) => { if (active) { setHistory(b); setTemplates(t); } }).catch(e => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
   const batchId = data?.batch.id, batchStatus = data?.batch.status;
   useEffect(() => { if (!batchId || !['RUNNING', 'PAUSED', 'CANCELLED', 'COMPLETED'].includes(batchStatus || '')) return; const timer = setInterval(() => { void refresh(batchId).catch(() => setError('Não foi possível atualizar o progresso.')); }, 8000); return () => clearInterval(timer); }, [batchId, batchStatus, refresh]);
   const run = async (work: () => Promise<void>) => { setBusy(true); setError(''); setConfirmed(false); try { await work(); } catch (e) { setError(e instanceof Error ? e.message : 'Falha na operação.'); } finally { setBusy(false); } };
-  async function create() { await run(async () => { const b = await api<{ id: number }>('', { name: `Documentos — ${new Date().toLocaleString('pt-BR')}` }); await refresh(b.id); setUploads([]); setTemplateId(''); setIncludeCommon(false); setHistory(await api<Batch[]>('')); }); }
-  async function upload(files: File[]) {
+  async function openBatch(id: number) {
+    await refresh(id); selectedFiles.current.clear(); setUploads([]);
+    try { setUploads(restoreImportQueue(localStorage, id)); }
+    catch { setError('Não foi possível ler a fila local. Selecione os PDFs novamente; cada hash será conferido no servidor.'); }
+  }
+  async function create() { await run(async () => { const b = await api<{ id: number }>('', { name: `Documentos — ${new Date().toLocaleString('pt-BR')}` }); await refresh(b.id); selectedFiles.current.clear(); setUploads([]); setTemplateId(''); setIncludeCommon(false); setHistory(await api<Batch[]>('')); }); }
+  async function upload(files: File[], recover = false) {
     if (!data || uploadGuard.current || busy) return;
     uploadGuard.current = true; setBusy(true); setError(''); setConfirmed(false);
-    const entries = files.map(f => ({ name: f.name, size: f.size, progress: 0, state: 'Aguardando' })); setUploads(entries);
-    const update = (i: number, progress: number, state: string) => setUploads(rows => rows.map((r, n) => n === i ? { ...r, progress, state } : r));
     try {
-      if (files.length + data.items.length > data.limits.batchFiles) throw new Error(`O lote permite até ${data.limits.batchFiles} documentos.`);
-      for (let i = 0; i < files.length; i++) {
+      const entries = uploads.map(e => ({ ...e }));
+      for (const file of files) {
         try {
-          const file = files[i]; validateSmartFile(file, data.limits || SMART_DEFAULTS);
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest(); xhr.open('POST', `/api/smart-sends/${data.batch.id}/upload`); xhr.timeout = 120000;
-            xhr.setRequestHeader('content-type', 'application/pdf'); xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name));
-            xhr.upload.onprogress = e => update(i, e.lengthComputable ? Math.round(e.loaded / e.total * 100) : 0, e.loaded === e.total ? 'Identificando empresa…' : 'Enviando arquivo…');
-            xhr.onload = () => { let body; try { body = JSON.parse(xhr.responseText); } catch { /* generic error */ } if (xhr.status >= 200 && xhr.status < 300) resolve(); else reject(new Error(body?.error || 'Falha no upload.')); };
-            xhr.onerror = () => reject(new Error('Falha de conexão.')); xhr.ontimeout = () => reject(new Error('Tempo esgotado. Confira o lote antes de importar novamente.')); xhr.send(file);
-          });
-          update(i, 100, 'Processado');
-        } catch (e) { update(i, 0, e instanceof Error ? e.message : 'Falha'); }
-        await refresh(data.batch.id);
+          const hash = await identifyFile(file, data.limits);
+          selectedFiles.current.set(hash, file);
+          const existing = entries.find(e => e.hash === hash && e.name === file.name);
+          if (existing?.phase === 'rejected') { existing.phase = 'queued'; existing.state = 'Aguardando reconciliação'; }
+          if (!existing) entries.push({ id: crypto.randomUUID(), hash, name: file.name, size: file.size, progress: 0, phase: 'queued', state: 'Aguardando' });
+        } catch (e) { entries.push({ id: crypto.randomUUID(), name: file.name.slice(0, 180), size: file.size, progress: 0, phase: 'rejected', state: e instanceof Error ? e.message : 'PDF inválido.' }); }
       }
+      if (entries.length > 500) throw new Error('A fila local permite até 500 arquivos. Selecione menos documentos.');
+      const changed = (rows: ImportEntry[]) => {
+        setUploads(rows);
+        try { saveImportQueue(localStorage, data.batch.id, rows); }
+        catch { throw new Error('Não foi possível preservar a fila neste navegador. Libere o armazenamento local antes de continuar.'); }
+      };
+      changed(entries);
+      const outcome = await processImportQueue(entries, {
+        snapshot: () => importSnapshot(data.batch.id), hasFile: entry => selectedFiles.current.has(entry.hash!), changed,
+        send: (entry, recovering, progress) => uploadPdf(data.batch.id, { ...entry, id: entry.result?.documentId || entry.id }, selectedFiles.current.get(entry.hash!)!, recovering, progress),
+        sync: () => refresh(data.batch.id),
+      }, recover || files.length > 0);
+      if (outcome.warning) setError(outcome.warning);
     } catch (e) { setError(e instanceof Error ? e.message : 'Falha no upload.'); }
     finally { setBusy(false); uploadGuard.current = false; if (fileInput.current) fileInput.current.value = ''; }
   }
@@ -82,10 +91,10 @@ export function SmartSendsPage() {
   return <div className="smart-sends"><section className="page-intro compact"><div><p className="eyebrow">DOCUMENTOS PERSONALIZADOS</p><h1>Envios Inteligentes</h1><p>Importe PDFs, revise os destinatários e acompanhe cada envio.</p></div><Button onClick={create} disabled={busy || loading}><Plus />Novo lote</Button></section>
     <ol className="smart-steps" aria-label="Etapas do envio">{['Importação', 'Identificação', 'Revisão', 'Confirmação', 'Acompanhamento'].map((s, i) => <li key={s} aria-current={i === step ? 'step' : undefined} className={i === step ? 'current' : i < step ? 'done' : ''}><span>{i + 1}</span>{s}</li>)}</ol>
     {error && <div className="smart-error" role="alert">{error}<Button variant="outline" size="sm" onClick={() => void run(async () => { if (batchId) await refresh(batchId); else { setHistory(await api<Batch[]>('')); setTemplates(await api<Template[]>('/templates')); } })} disabled={busy}>Tentar novamente</Button></div>}
-    {loading ? <p role="status">Carregando Envios Inteligentes…</p> : <section className="panel smart-panel"><label>Lotes recentes<select disabled={busy} value={data?.batch.id || ''} onChange={e => e.target.value && void run(async () => { await refresh(Number(e.target.value)); setUploads([]); })}><option value="">Selecione um lote</option>{history.map(b => <option key={b.id} value={b.id}>{b.name} · {labels[b.status] || b.status}</option>)}</select></label>{!data && <div className="smart-empty"><FileUp size={36} /><h2>Um documento, o destinatário certo</h2><p>Crie um lote para importar arquivos. Você aprova cada associação antes de iniciar os envios.</p></div>}</section>}
+    {loading ? <p role="status">Carregando Envios Inteligentes…</p> : <section className="panel smart-panel"><label>Lotes recentes<select disabled={busy} value={data?.batch.id || ''} onChange={e => e.target.value && void run(() => openBatch(Number(e.target.value)))}><option value="">Selecione um lote</option>{history.map(b => <option key={b.id} value={b.id}>{b.name} · {labels[b.status] || b.status}</option>)}</select></label>{!data && <div className="smart-empty"><FileUp size={36} /><h2>Um documento, o destinatário certo</h2><p>Crie um lote para importar arquivos. Você aprova cada associação antes de iniciar os envios.</p></div>}</section>}
     {data && <><section className="panel smart-panel"><div className="smart-heading"><div><h2>{data.batch.name}</h2><p>{labels[data.batch.status]}</p></div><Button variant="outline" disabled={busy} onClick={() => void run(async () => { await refresh(data.batch.id); })}><RefreshCw />Atualizar</Button></div>
       {editing && <><div className={`smart-drop ${drag ? 'drag' : ''}`} onDragOver={e => { e.preventDefault(); if (!busy) setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={e => { e.preventDefault(); setDrag(false); void upload(Array.from(e.dataTransfer.files)); }}><FileUp size={28} /><h3>Arraste seus PDFs até aqui</h3><p>Até {data.limits.batchFiles} documentos · {formatFileSize(data.limits.fileBytes)} por PDF · envio de arquivos um por vez</p><input ref={fileInput} className="smart-file-input" type="file" multiple accept="application/pdf,.pdf" id="smart-files" disabled={busy} onChange={e => void upload(Array.from(e.target.files || []))} /><label htmlFor="smart-files">Selecionar PDFs</label></div>
-      {!!uploads.length && <ul className="smart-upload-list" aria-live="polite">{uploads.map((u, i) => <li key={i}><span>{u.name} · {formatFileSize(u.size)}</span><progress max="100" value={u.progress} aria-label={`Upload ${u.name}`} /><small>{u.state}</small></li>)}</ul>}</>}
+      {!!uploads.length && <><ul className="smart-upload-list" aria-live="polite">{uploads.map((u, i) => <li key={i}><span>{u.name} · {formatFileSize(u.size)}</span><progress max="100" value={u.progress} aria-label={`Upload ${u.name}`} /><small>{u.state}</small></li>)}</ul><Button variant="outline" disabled={busy} onClick={() => void upload([], true)}>Recuperar pendentes</Button><p>Após recarregar a página, selecione este lote e os PDFs pendentes novamente. Os documentos salvos serão conferidos antes de qualquer reenvio.</p></>}</>}
       {!editing && <><div className="smart-stats"><div><strong>{data.items.length}</strong>Total</div>{Object.entries(counts).map(([s, count]) => <div key={s}><strong>{count}</strong>{labels[s]}</div>)}</div><progress className="smart-progress" max={Math.max(1, data.items.length)} value={finished} aria-label="Progresso global" /><p>{finished} de {data.items.length} documentos com resultado. Aceitação pelo Gmail não comprova entrega.</p>{data.batch.notice && <p role="status" className="smart-notice">{data.batch.notice}</p>}<div className="smart-actions">{data.batch.status === 'RUNNING' && <Button disabled={busy} variant="outline" onClick={() => void control('pause')}>Pausar</Button>}{data.batch.status === 'PAUSED' && <Button disabled={busy || counts.UNCERTAIN > 0 || counts.PROCESSING > 0} onClick={() => void control('resume')}>Retomar</Button>}{['RUNNING', 'PAUSED'].includes(data.batch.status) && <Button variant="outline" disabled={busy} onClick={() => { if (window.confirm('Cancelar os itens pendentes? Um envio já iniciado pode terminar.')) void control('cancel'); }}>Cancelar pendentes</Button>}<a href={`/api/smart-sends/${data.batch.id}/report`}>Exportar relatório CSV</a></div></>}
       {!!data.items.length && <div className="smart-table-wrap"><table><caption>Documento → Empresa → E-mail destinatário</caption><thead><tr><th>Documento</th><th>CNPJ / Empresa</th><th>Destinatário</th><th>Identificação</th><th>Status</th><th>Ações</th></tr></thead><tbody>{data.items.map(item => <tr key={item.id} className={item.excluded ? 'excluded' : ''}><td><strong>{item.fileName}</strong><small>{formatFileSize(item.fileSize)}</small>{item.fileReady && !item.fileDeletedAt && <a href={`/api/smart-sends/${data.batch.id}/items/${item.id}/file`} target="_blank" rel="noreferrer">Visualizar PDF</a>}</td><td>{item.companyName || 'Associação pendente'}<small>{item.extractedCnpjs.join(', ') || item.companyCnpj || 'CNPJ não identificado'}</small></td><td>{item.recipient || 'Sem destinatário'}</td><td>{({ CNPJ: 'CNPJ no PDF', FILENAME: 'Nome do arquivo', MANUAL: 'Manual' } as Record<string, string>)[item.identificationMethod]}{item.candidates.length > 0 && <small>{item.candidates.length} sugestão(ões)</small>}</td><td><span className={`smart-status ${item.reviewStatus === 'READY' || item.sendStatus === 'SENT' ? 'ok' : ''}`}>{item.excluded ? 'Excluído do envio' : labels[editing ? item.reviewStatus : item.sendStatus]}</span>{!editing && <small>{labels[item.deliveryStatus] || item.deliveryStatus}</small>}{(item.error || item.deliveryError) && <small>{readingErrors[item.error || ''] || item.error || item.deliveryError}</small>}</td><td>{editing ? <div className="smart-row-actions">{item.readable && item.fileReady && !item.fileDeletedAt && item.reviewStatus !== 'DUPLICATE' && <><CompanyPicker item={item} disabled={busy} onChoose={companyId => void review(item, { companyId })} /><Button size="sm" variant="outline" disabled={busy || item.excluded || !item.companyId || !['IDENTIFIED', 'READY'].includes(item.reviewStatus)} onClick={() => void review(item, { confirm: true })}>{item.reviewStatus === 'READY' ? 'Confirmado' : 'Confirmar associação'}</Button></>}<label><input type="checkbox" checked={item.excluded} disabled={busy} onChange={e => void review(item, { excluded: e.target.checked })} />Excluir do envio</label><button disabled={busy} onClick={() => void review(item, { remove: true })}>Remover documento</button></div> : item.sendStatus === 'UNCERTAIN' ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { if (window.confirm('O Gmail pode ter aceitado a mensagem. Encerrar este item sem reenviar e manter o resultado incerto no histórico?')) void run(async () => { await api(`/${data.batch.id}/items/${item.id}/resolve`, { acknowledgeUncertain: true }); await refresh(data.batch.id); }); }}>Encerrar sem reenviar</Button> : '—'}</td></tr>)}</tbody></table></div>}
     </section>

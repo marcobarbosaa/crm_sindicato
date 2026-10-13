@@ -10,12 +10,13 @@ const engine = new PGlite(), schema = loader()('db/schema.ts'), db = drizzle(eng
 const realFetch = globalThis.fetch;
 let options, objects, sends, encoded;
 const config = key => ({ SMART_SEND_ALLOW_LOCAL: 'true' })[key];
-const storage = { async put(key, bytes) { if (options.uploadFail) throw Error('storage'); objects.set(key, new Uint8Array(bytes)); }, async get(key) { if (options.storageFail) throw Error('storage'); return objects.get(key); }, async remove(key) { objects.delete(key); } };
+const storage = { async put(key, bytes) { if (options.uploadFail) throw Error('storage'); objects.set(key, new Uint8Array(bytes)); if (options.lostStorageResponse) throw Error('timeout after save'); }, async get(key) { if (options.storageFail) throw Error('storage'); if (!objects.has(key)) throw new (load('lib/smart-send-policy.ts').SmartSendError)('missing', 404); return objects.get(key); }, async remove(key) { objects.delete(key); } };
 const actualGmail = loader()('lib/gmail.ts');
 const storageModule = loader({ 'cloudflare:workers': { env: {} } })('lib/smart-send-storage.ts');
 const gmailMock = { ...actualGmail, decryptToken: async () => 'synthetic', refreshAccessToken: async () => { if (options.oauthFail) throw new actualGmail.GmailOAuthError(400, 'invalid_grant'); await options.beforeBarrier?.(); return 'mock-token'; }, encodeRawEmail: args => { encoded.push(args); return actualGmail.encodeRawEmail(args); } };
 const load = loader({ '@/db': { getDb: () => db, withCampaignDb: fn => fn() }, '@/db/schema': schema, unpdf,
   './attachment-storage': { storageConfig: config, attachmentStorage: () => ({ ...storage, get: async key => objects.get(key) }) },
+  '@/lib/attachment-storage': { storageConfig: config },
   './smart-send-storage': { ...storageModule, smartStorage: () => storage },
   './gmail': gmailMock, '@/lib/gmail': gmailMock,
   './gmail-delivery-client': { DeliverySyncError: class extends Error { constructor(code) { super(code); this.code = code; } },
@@ -87,8 +88,92 @@ test('arquivo, empresa, lote e preview de outro proprietário são inacessíveis
   await assert.rejects(service.reviewSmartItem(owner, batchId, item.id, { companyId: Number(foreign.id), confirm: true }), /não encontrada/);
 });
 test('falha de upload permanece rastreável e bloqueada', async () => {
-  options.uploadFail = true; await assert.rejects(upload()); const [item] = await db.select().from(items);
+  options.uploadFail = true; await upload(); const [item] = await db.select().from(items);
   assert.equal(item.fileReady, false); assert.equal(item.reviewStatus, 'READ_ERROR'); assert.equal(sends.length, 0);
+});
+
+test('protocolo de importação confirma ID, hash e persistência sem payload de revisão', async () => {
+  const id = crypto.randomUUID(), bytes = pdfFixture('Destinataria 11222333000181');
+  const result = await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id);
+  assert.equal(result.documentId, id); assert.equal(result.persistence, 'persisted'); assert.equal(result.storage, 'stored'); assert.equal(result.analysis, 'complete');
+  const snapshot = await service.getSmartImportStatus(owner, batchId);
+  assert.equal(snapshot.batchId, batchId); assert.deepEqual(snapshot.items, [result]);
+  const serialized = JSON.stringify(snapshot);
+  for (const field of ['storageKey', 'subject', 'recipient', 'deliveryLockToken', 'candidates']) assert.equal(serialized.includes('"' + field + '"'), false);
+  await assert.rejects(service.getSmartImportStatus('intruder', batchId), /não encontrado/);
+  assert.deepEqual(await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id), result);
+  assert.equal((await db.select().from(items)).length, 1);
+  await assert.rejects(service.uploadSmartPdf(owner, batchId, 'other.pdf', 'application/pdf', pdfFixture('different'), id), /incompatível/);
+});
+
+test('rotas de upload e progresso mantêm contrato JSON verificável e isolado', async () => {
+  const route = load('app/api/smart-sends/[[...path]]/route.ts'), id = crypto.randomUUID();
+  const context = path => ({ params: Promise.resolve({ path: [String(batchId), path] }) });
+  const request = new Request(`https://app.test/api/smart-sends/${batchId}/upload`, { method: 'POST', headers: { 'content-type': 'application/pdf', 'x-file-name': 'test.pdf', 'x-upload-id': id }, body: pdfFixture('Destinataria 11222333000181') });
+  const response = await route.POST(request, context('upload'));
+  assert.equal(response.status, 201); assert.match(response.headers.get('content-type'), /application\/json/);
+  const body = await response.json(); assert.equal(body.documentId, id); assert.equal(body.storage, 'stored'); assert.equal(body.persistence, 'persisted');
+  const progress = await route.GET(new Request('https://app.test/api/smart-sends/1/import-status'), context('import-status'));
+  assert.equal((await progress.json()).items[0].documentId, id);
+  const invalid = await route.POST(new Request(request.url, { method: 'POST', headers: { 'content-type': 'application/pdf', 'x-file-name': 'bad.pdf', 'x-upload-id': crypto.randomUUID() }, body: 'not pdf' }), context('upload'));
+  assert.equal(invalid.status, 400); assert.equal((await invalid.json()).code, 'REQUEST_REJECTED'); assert.equal((await db.select().from(items)).length, 1);
+});
+
+test('timeout de storage após gravar recupera objeto existente e mesmo registro', async () => {
+  const id = crypto.randomUUID(), bytes = pdfFixture('Destinataria 11222333000181');
+  options.lostStorageResponse = true;
+  const first = await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id);
+  assert.equal(first.persistence, 'persisted'); assert.equal(first.storage, 'pending'); assert.equal(first.code, 'IMPORT_STORAGE_FAILED'); assert.equal(objects.size, 1);
+  // A second put would throw too; recovery must discover the original object.
+  const recovered = await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id, true);
+  assert.equal(recovered.storage, 'stored'); assert.equal(recovered.analysis, 'complete'); assert.equal(recovered.documentId, id);
+  assert.equal((await db.select().from(items)).length, 1);
+});
+
+test('storage ausente recupera usando bytes selecionados sem criar duplicata', async () => {
+  const id = crypto.randomUUID(), bytes = pdfFixture('Destinataria 11222333000181'); options.uploadFail = true;
+  const first = await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id);
+  assert.equal(first.recoverable, true); assert.equal(objects.size, 0);
+  options.uploadFail = false;
+  const recovered = await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id, true);
+  assert.equal(recovered.analysis, 'complete'); assert.equal(objects.size, 1); assert.equal((await db.select().from(items)).length, 1);
+});
+
+test('recuperação aguarda lease ativo, retoma análise interrompida e respeita remoção', async () => {
+  const id = crypto.randomUUID(), bytes = pdfFixture('Destinataria 11222333000181');
+  await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id);
+  await db.update(items).set({ reviewStatus: 'UPLOADING', updatedAt: new Date() }).where(eq(items.id, id));
+  assert.equal((await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id, true)).analysis, 'pending');
+  await db.update(items).set({ updatedAt: new Date(Date.now() - 6 * 60_000) }).where(eq(items.id, id));
+  assert.equal((await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id, true)).analysis, 'complete');
+  await service.reviewSmartItem(owner, batchId, id, { remove: true });
+  const removed = await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id, true);
+  assert.equal(removed.storage, 'deleted'); assert.equal(removed.recoverable, false); assert.equal((await db.select().from(items)).length, 1);
+});
+
+test('recuperação rejeita conteúdo alterado no storage e nunca o sobrescreve', async () => {
+  const id = crypto.randomUUID(), bytes = pdfFixture('Destinataria 11222333000181');
+  await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id);
+  await db.update(items).set({ reviewStatus: 'READ_ERROR', error: 'IMPORT_ANALYSIS_FAILED' }).where(eq(items.id, id));
+  const altered = pdfFixture('changed'); objects.set(`smart-sends/${id}.pdf`, altered);
+  const recovered = await service.uploadSmartPdf(owner, batchId, 'file.pdf', 'application/pdf', bytes, id, true);
+  assert.equal(recovered.analysis, 'pending'); assert.deepEqual(objects.get(`smart-sends/${id}.pdf`), altered);
+});
+
+test('PDF corrompido está salvo mas não é apresentado como análise bem-sucedida', async () => {
+  const result = await service.uploadSmartPdf(owner, batchId, 'broken.pdf', 'application/pdf', new TextEncoder().encode('%PDF-broken'));
+  assert.equal(result.storage, 'stored'); assert.equal(result.analysis, 'failed'); assert.equal(result.code, 'PDF_CORRUPT'); assert.equal(result.recoverable, false);
+});
+
+test('100 PDFs sintéticos persistem sem truncar nem serializar bigint nativo', async () => {
+  for (let n = 0; n < 100; n++) {
+    const result = await service.uploadSmartPdf(owner, batchId, `doc-${n}.pdf`, 'application/pdf', pdfFixture(`Destinataria 11222333000181 ${n}`), crypto.randomUUID());
+    assert.equal(result.persistence, 'persisted'); assert.equal(result.analysis, 'complete');
+  }
+  const progress = await service.getSmartImportStatus(owner, batchId), detail = await service.getSmartBatch(owner, batchId);
+  assert.equal(progress.items.length, 100); assert.equal(detail.items.length, 100);
+  assert.ok(JSON.stringify(progress).length < JSON.stringify(detail).length / 2);
+  assert.equal(sends.length, 0);
 });
 test('falha de storage nunca inicia Gmail e tem retentativas limitadas', async () => {
   await start(); options.storageFail = true;
