@@ -1,5 +1,21 @@
 # Auditoria prévia — Envios Inteligentes
 
+## Correção da validação de IDs na importação
+
+A divergência foi reproduzida **antes da alteração**: `importSnapshot("1")` recebendo o JSON `{ "batchId": 1, "items": [] }` falhava com `INVALID_RESPONSE` e a mensagem “Não foi possível verificar os documentos do lote.” O `z.literal(batchId)` preservava o tipo string recebido em runtime, apesar da assinatura TypeScript declarar `number`. O serviço de detalhe repassava `batch.id` sem normalização, enquanto o progresso usava `Number(batch.id)`. Isso confirma o defeito de contrato; não foi acessada uma resposta de produção para comprovar que o driver retornou string na ocorrência relatada.
+
+`lib/smart-send-contract.ts` centraliza a normalização restrita a identificadores: aceita inteiros positivos seguros e strings compostas somente por dígitos decimais, rejeitando espaços, sinais, frações, expoentes, hexadecimal, booleanos, nulos e valores fora do intervalo seguro. A API normaliza IDs do histórico, criação, detalhe, empresas e templates; o frontend aplica a mesma regra às respostas. UUIDs dos documentos, hashes, booleanos, mensagens e demais dados não são convertidos. `getSmartBatch()` e `getSmartImportStatus()` retornam o ID do lote normalizado, inclusive quando a origem simulada fornece string.
+
+`importSnapshot()` valida o ID solicitado antes da requisição, valida os campos da resposta e só então compara os IDs normalizados. Um ID de outro lote continua rejeitado. Os erros registram `smart-sends.contract-rejected` com nome fixo do contrato, caminhos de campos e códigos de validação; não registram corpo da resposta, valores, mensagens internas do Zod, PDF, tokens ou destinatários. A interface inclui o campo/contrato rejeitado na mensagem segura.
+
+O novo `scripts/test-smart-import-contract.mjs` cobre a reprodução original, IDs número/string, lotes com 0/1/30/100 documentos, todos os campos de cada item, JSON malformado, IDs inválidos e divergentes, privacidade dos diagnósticos, normalização das fronteiras e recuperação sem reenviar documento salvo. Também executa os serviços reais com resultados de banco simulados contendo ID string, serializa seu JSON e o passa ao cliente. As regressões existentes de associação de empresa com ID string permanecem incluídas. Não houve alteração em Storage, autenticação, Gmail, campanhas tradicionais, cron, quotas, destinatários ou idempotência.
+
+Arquivos desta correção: `lib/smart-send-contract.ts`, `lib/smart-import-client.ts`, `lib/smart-send-service.ts`, `app/api/smart-sends/[[...path]]/route.ts`, `scripts/test-smart-import-contract.mjs` e este relatório.
+
+Validação desta correção: **85 testes aprovados**, TypeScript e lint sem erros, build concluído (avisos de tamanho de chunks e classificação de rotas do Vinext). Comando de regressão: `node --test scripts/test-smart-import-contract.mjs scripts/test-smart-import.mjs scripts/test-smart-foundation.mjs scripts/test-smart-sends.mjs scripts/test-smart-security.mjs scripts/test-smart-worker.mjs scripts/test-smart-company-picker.mjs`. Nenhum deploy realizado.
+
+## Registro da auditoria original
+
 Inspeção em 08/10/2026, antes da implementação.
 
 - Runtime efetivo: Vinext sobre Cloudflare Workers; Drizzle/PostgreSQL (Supabase), não Prisma nem OpenNext. Partes históricas de ARQUITETURA.md estão desatualizadas.

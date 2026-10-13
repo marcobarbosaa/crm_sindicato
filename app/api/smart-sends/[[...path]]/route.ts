@@ -8,16 +8,17 @@ import { boundedBytes, contentHash, smartStorage } from '@/lib/smart-send-storag
 import { SmartSendError, csvCell, smartLimits } from '@/lib/smart-send-policy';
 import { storageConfig } from '@/lib/attachment-storage';
 import { AttachmentError } from '@/lib/attachments';
+import { normalizeSmartApiIds, smartNumericId } from '@/lib/smart-send-contract';
 import { controlSmartBatch, getSmartBatch, getSmartImportStatus, ownedItems, prepareSmartBatch, reviewSmartItem, smartCatalog, uploadSmartPdf } from '@/lib/smart-send-service';
 type Context = { params: Promise<{ path?: string[] }> };
-const idSchema = z.coerce.number().int().positive().safe();
+const idSchema = smartNumericId;
 async function json(request: Request) { return JSON.parse(new TextDecoder().decode(await boundedBytes(request.body, 64 * 1024))) as unknown; }
 async function handle(request: NextRequest, context: Context) {
   try {
     const owner = await smartOwner(request), path = (await context.params).path || [];
     return await withCampaignDb(async () => {
       const db = getDb(), method = request.method;
-      const response = (value: unknown, status = 200) => NextResponse.json(value, { status, headers: { 'cache-control': 'private, no-store' } });
+      const response = (value: unknown, status = 200) => NextResponse.json(normalizeSmartApiIds(path.join('/'), value), { status, headers: { 'cache-control': 'private, no-store' } });
       if (!path.length) {
         if (method === 'GET') return response(await db.select({ id: batches.id, name: batches.name, status: batches.status, createdAt: batches.createdAt }).from(batches).where(eq(batches.ownerId, owner)).orderBy(desc(batches.createdAt)).limit(100));
         if (method === 'POST') {

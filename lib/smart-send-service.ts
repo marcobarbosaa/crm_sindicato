@@ -10,6 +10,7 @@ import { extractCnpjs, matchPdfCompany, normalizeName } from './pdf-company-matc
 import { readPdfText } from './pdf-text';
 import { GMAIL_SEND_SCOPE } from './gmail';
 import { importResult, IMPORT_LEASE_MS } from './smart-import-protocol';
+import { parseSmartContract, smartNumericId } from './smart-send-contract';
 export const ownedBatch = (owner: string, id: number) => and(eq(batches.ownerId, owner), eq(batches.id, id));
 export const ownedItems = (owner: string, id: number) => and(eq(items.ownerId, owner), eq(items.batchId, id));
 export async function requireBatch(owner: string, id: number, tx: Transaction) {
@@ -33,7 +34,7 @@ export async function getSmartBatch(owner: string, id: number) {
   const eligible = rows.filter(row => !row.excluded && row.reviewStatus === 'READY' && row.confirmedAt && row.fileReady && !row.fileDeletedAt);
   const candidateIds = [...new Set(rows.flatMap(row => row.candidates))];
   const suggestions = candidateIds.length ? await db.select({ id: companies.id, name: companies.name, primaryEmail: companies.primaryEmail }).from(companies).where(and(eq(companies.ownerId, owner), inArray(companies.id, candidateIds))) : [];
-  return { batch: { ...batch, lockToken: undefined }, items: rows.map(row => ({ ...row, storageKey: undefined, deliveryLockToken: undefined, suggestions: suggestions.filter(c => row.candidates.includes(Number(c.id))) })),
+  return { batch: { ...batch, id: parseSmartContract(smartNumericId, batch.id, 'batch-detail-id'), lockToken: undefined }, items: rows.map(row => ({ ...row, storageKey: undefined, deliveryLockToken: undefined, suggestions: suggestions.filter(c => row.candidates.includes(Number(c.id))) })),
     summary: { documents: rows.length, companies: new Set(eligible.map(i => i.companyId)).size, eligible: eligible.length,
       blocked: rows.filter(i => !i.excluded && !eligible.includes(i)).length, duplicates: rows.filter(i => i.duplicateOf).length,
       withoutEmail: rows.filter(i => !i.recipient).length, excluded: rows.filter(i => i.excluded).length },
@@ -55,7 +56,7 @@ export async function getSmartImportStatus(owner: string, batchId: number) {
   const rows = await db.select({ id: items.id, contentHash: items.contentHash, fileReady: items.fileReady,
     fileDeletedAt: items.fileDeletedAt, removedAt: items.removedAt, duplicateOf: items.duplicateOf,
     reviewStatus: items.reviewStatus, error: items.error }).from(items).where(ownedItems(owner, batchId));
-  return { batchId: Number(batch.id), items: rows.map(importResult) };
+  return { batchId: parseSmartContract(smartNumericId, batch.id, 'import-status-id'), items: rows.map(importResult) };
 }
 export async function uploadSmartPdf(owner: string, batchId: number, name: string, mime: string, bytes: Uint8Array, uploadId?: string, recover = false) {
   const limits = smartLimits(storageConfig); validateSmartFile({ name, type: mime, size: bytes.length }, limits);

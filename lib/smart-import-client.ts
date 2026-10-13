@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { type ImportResult } from './smart-import-protocol';
 import { validateSmartFile, type SmartLimits } from './smart-send-policy';
+import { normalizeSmartApiIds, parseSmartContract, rejectSmartContract, SmartContractError, smartNumericId } from './smart-send-contract';
 
 const resultSchema = z.object({ documentId: z.string().uuid(), contentHash: z.string().regex(/^[a-f0-9]{64}$/), persistence: z.literal('persisted'),
   storage: z.enum(['stored', 'pending', 'duplicate', 'deleted']), analysis: z.enum(['complete', 'failed', 'pending']),
@@ -28,17 +29,24 @@ export async function smartJson<T>(path: string, body?: unknown, method = 'POST'
   try {
     const r = await fetch('/api/smart-sends' + path, { cache: 'no-store', signal: AbortSignal.timeout(30_000),
       ...(body === undefined ? {} : { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) });
-    return decodeResponse(r.status, r.headers.get('content-type'), await r.text()) as T;
+    return normalizeSmartApiIds(path, decodeResponse(r.status, r.headers.get('content-type'), await r.text())) as T;
   } catch (error) {
     if (error instanceof ImportRequestError) throw error;
+    if (error instanceof SmartContractError) throw new ImportRequestError(error.message, 200, 'INVALID_RESPONSE');
     throw new ImportRequestError('Falha de conexão ou tempo esgotado. Reconcilie a fila antes de continuar.');
   }
 }
-export async function importSnapshot(batchId: number) {
-  const body = await smartJson<unknown>(`/${batchId}/import-status`);
-  const parsed = z.object({ batchId: z.literal(batchId), items: z.array(resultSchema) }).safeParse(body);
-  if (!parsed.success) throw new ImportRequestError('Não foi possível verificar os documentos do lote.', 200, 'INVALID_RESPONSE');
-  return parsed.data.items;
+export async function importSnapshot(batchId: number | string) {
+  try {
+    const id = parseSmartContract(smartNumericId, batchId, 'import-status-request-id');
+    const body = await smartJson<unknown>(`/${id}/import-status`);
+    const parsed = parseSmartContract(z.object({ batchId: smartNumericId, items: z.array(resultSchema) }), body, 'import-status');
+    if (parsed.batchId !== id) rejectSmartContract('import-status', [{ path: ['batchId'], code: 'batch_mismatch' }]);
+    return parsed.items;
+  } catch (error) {
+    if (error instanceof SmartContractError) throw new ImportRequestError(`Não foi possível verificar os documentos do lote. ${error.message}`, 200, 'INVALID_RESPONSE');
+    throw error;
+  }
 }
 export function uploadPdf(batchId: number, entry: ImportEntry, file: File, recover: boolean, progress: (value: number) => void): Promise<ImportResult> {
   return new Promise((resolve, reject) => {
