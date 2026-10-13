@@ -110,3 +110,36 @@ test('hashs sintéticos são estáveis após reabrir arquivos; arquivo inválido
   assert.equal(await identifyFile(file, SMART_DEFAULTS), await identifyFile(new File([bytes], 'renamed.pdf', { type: 'application/pdf' }), SMART_DEFAULTS));
   await assert.rejects(identifyFile(new File(['html'], 'file.html', { type: 'text/html' }), SMART_DEFAULTS));
 });
+test('pausa aguarda a confirmação do upload ativo e preserva os próximos; retomada não duplica', async () => {
+  const h = harness(3); let paused = false, finish;
+  const send = h.io.send;
+  h.io.shouldPause = () => paused;
+  h.io.send = async (...args) => { await new Promise(resolve => { finish = resolve; }); return send(...args); };
+  const running = processImportQueue(h.entries, h.io);
+  await new Promise(resolve => setImmediate(resolve));
+  paused = true; finish();
+  const outcome = await running;
+  assert.equal(outcome.entries[0].phase, 'confirmed');
+  assert.deepEqual(outcome.entries.slice(1).map(e => e.phase), ['queued', 'queued']);
+  assert.equal(h.sent.length, 1);
+  paused = false; h.io.send = send;
+  await processImportQueue(outcome.entries, h.io);
+  assert.deepEqual(h.sent, ['1.pdf', '2.pdf', '3.pdf']);
+});
+test('adicionar arquivos ou continuar sem recuperação explícita não reenvia resultado incerto', async () => {
+  const h = harness(3); h.entries[0].phase = 'uncertain';
+  const outcome = await processImportQueue(h.entries, h.io);
+  assert.deepEqual(h.sent, ['2.pdf', '3.pdf']);
+  assert.equal(outcome.entries[0].phase, 'uncertain');
+  assert.match(outcome.entries[0].state, /Confira o resultado/);
+});
+test('um PDF renomeado não contorna a proteção de resultado incerto do mesmo conteúdo', async () => {
+  const h = harness(3); h.entries[0].phase = 'uncertain'; h.entries[1].hash = h.entries[0].hash;
+  const outcome = await processImportQueue(h.entries, h.io);
+  assert.deepEqual(h.sent, ['3.pdf']);
+  assert.equal(outcome.entries[0].phase, 'uncertain');
+  assert.equal(outcome.entries[1].phase, 'queued');
+  const recovered = await processImportQueue(outcome.entries, h.io, true);
+  assert.deepEqual(h.sent, ['3.pdf', '1.pdf']);
+  assert.equal(recovered.entries[0].id, recovered.entries[1].id);
+});

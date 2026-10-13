@@ -89,6 +89,7 @@ type QueueIO = {
   hasFile: (entry: ImportEntry) => boolean;
   changed: (entries: ImportEntry[]) => void;
   sync: () => Promise<unknown>;
+  shouldPause?: () => boolean;
 };
 // The queue has no React dependency so failure/reload behavior is exercised directly.
 export async function processImportQueue(input: ImportEntry[], io: QueueIO, recover = false) {
@@ -114,6 +115,12 @@ export async function processImportQueue(input: ImportEntry[], io: QueueIO, reco
         }
         entry.result = existing;
       }
+      // Pause only between requests. Never abort a document being persisted.
+      if (io.shouldPause?.()) break;
+      // Selecting additional files must not retry an uncertain earlier request.
+      if (!recover && entries.some(other => other.hash === entry.hash && other.phase === 'uncertain')) {
+        entry.state = 'Confira o resultado deste PDF antes de tentar novamente.'; publish(); continue;
+      }
       if (!io.hasFile(entry)) { entry.state = 'Selecione novamente este PDF para recuperar a importação.'; publish(); continue; }
       entry.phase = 'sending'; entry.state = existing ? 'Recuperando documento salvo…' : 'Enviando arquivo…'; publish();
       try {
@@ -132,7 +139,7 @@ export async function processImportQueue(input: ImportEntry[], io: QueueIO, reco
         if (saved) accept(entry, saved);
         else if ([400, 413, 422].includes(failure.status)) { entry.phase = 'rejected'; entry.state = failure.message; }
         publish();
-        if (!saved && entry.phase !== 'rejected') { warning = 'Resultado ainda incerto. A fila restante foi preservada; use Recuperar pendentes.'; break; }
+        if (!saved && entry.phase !== 'rejected') { warning = 'Resultado ainda incerto. A fila restante foi preservada; confira as pendências antes de tentar recuperar a importação.'; break; }
         if (failure.status >= 500 && ++failures >= 2) { warning = 'Serviço indisponível repetidamente. A fila restante foi preservada.'; break; }
       }
     }

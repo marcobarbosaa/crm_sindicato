@@ -10,6 +10,20 @@ O servidor valida extensão, MIME, assinatura, tamanho e SHA-256. O reconhecimen
 
 Todas as associações exigem confirmação por documento. O destinatário é o e-mail principal da empresa, validado novamente na preparação e imediatamente antes do envio. Contatos primários alimentam `{{contato}}`, sem mudar o destinatário. As demais variáveis são empresa, segmento, cidade, estado e email_empresa. A prévia congela assunto, corpo e assinatura no banco. Anexos comuns são opt-in e ficam vinculados pelos IDs persistidos no servidor; a limpeza existente respeita essa retenção mesmo após remoção do anexo do template.
 
+## Importação — interface da etapa 2
+
+Ao criar ou abrir um lote editável, a importação tem uma tela própria. Ela mostra nome do lote, etapa atual, navegação para os lotes, seleção múltipla/drag and drop e limites de documentos, bytes e páginas retornados pelo backend. Identificação e configuração da mensagem aparecem depois de **Continuar para identificação**. É possível voltar à importação e adicionar mais PDFs.
+
+Os contadores acompanham a fila real e os documentos já existentes no lote. **100% transmitido** indica o término da transmissão; a linha continua em análise até a confirmação do servidor. Falhas de leitura, duplicatas e resultados incertos não contam como concluídos. A lista mostra 25 arquivos por página, com filtro de falhas e área de rolagem acessível por teclado; os totais incluem todas as páginas.
+
+- **Pausar novos uploads** permite concluir a requisição atual e preserva os demais arquivos. **Continuar importação** retoma os aguardando.
+- **Tentar novamente falhas recuperáveis** usa a recuperação da etapa 1, consultando os registros existentes antes de qualquer tentativa. Adicionar arquivos ou continuar a fila não reenvia automaticamente um resultado incerto.
+- A remoção da fila fica disponível para arquivos ainda não enviados, com a fila parada. Não remove registros já persistidos.
+- Após recarregar ou reabrir o lote, os arquivos pendentes precisam ser selecionados novamente; o navegador conserva apenas os metadados da fila. Um lote sem metadados locais ainda mostra seus documentos salvos.
+- Para avançar com parte dos arquivos, a tela lista os que ficarão pendentes e exige ciência do usuário. O botão depende de pelo menos um documento disponível para identificação. Essa ação não inicia e-mails nem altera as regras de revisão/envio.
+
+Implementação em `components/smart-sends/{import-step,upload-dropzone,upload-progress,upload-file-list}.tsx`, com derivação dos estados em `import-state.ts`. Evidências e comandos desta etapa estão na auditoria.
+
 ## Implantação manual
 
 Nenhuma etapa abaixo foi executada em produção.

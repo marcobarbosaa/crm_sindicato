@@ -28,3 +28,84 @@
 .smart-sends .smart-message { background: #f8fafc; border: 1px solid #e8edf3; border-radius: 10px; padding: 20px; }.smart-sends pre { white-space: pre-wrap; font-family: inherit; font-size: 14px; line-height: 1.65; margin-top: 14px; overflow-wrap: anywhere; }
 .smart-sends .smart-error { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px; background: #fff1f2; color: #9f1239; border-radius: 10px; }.smart-sends .smart-notice { padding: 12px; background: #fff7ed; }
 @media (max-width: 640px) { .smart-sends .smart-panel { padding: 16px; }.smart-sends .smart-steps { gap: 8px; }.smart-sends .smart-steps li { min-width: 95px; font-size: 11px; }.smart-sends .smart-error { flex-direction: column; align-items: flex-start; } }
+
+/* Import-only layout: keep the CRM typography, palette and shared buttons. */
+.smart-sends .smart-back { justify-self: start; margin-bottom: -12px; }
+.smart-sends .page-intro { margin-bottom: 0; }
+.smart-sends .page-intro p { overflow-wrap: anywhere; }
+.smart-sends .smart-import { font-size: 14px; line-height: 1.5; }
+.smart-sends .smart-import .smart-heading { align-items: flex-start; }
+.smart-sends .smart-import .smart-heading p { margin-top: 5px; max-width: 660px; }
+.smart-sends .smart-import-step-label { color: #64748b; font-size: 12px; white-space: nowrap; padding-top: 3px; }
+.smart-sends .smart-import .smart-drop { padding: 28px 20px; gap: 10px; border-color: #b9c9e4; background: #f8faff; }
+.smart-sends .smart-import .smart-drop > svg { color: #2563eb; }
+.smart-sends .smart-import .smart-drop.drag { border-color: #2563eb; background: #eff6ff; }
+.smart-sends .smart-import .smart-drop[aria-disabled=true] { background: #f8fafc; }
+.smart-sends .smart-import .smart-import-limits { font-size: 12px; margin-top: 3px; }
+.smart-sends .smart-import-progress { margin-top: 24px; }
+.smart-sends .smart-import-counts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; padding-bottom: 20px; border-bottom: 1px solid #e8edf3; }
+.smart-sends .smart-import-counts dt { color: #64748b; font-size: 12px; }
+.smart-sends .smart-import-counts dd { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; color: #172033; margin-top: 2px; }
+.smart-sends .smart-import-counts [data-count="Concluídos"] dd { color: #065f46; }
+.smart-sends .smart-import-counts [data-count="Com falha"] dd { color: #9f1239; }
+.smart-sends .smart-import-progress-heading { display: flex; justify-content: space-between; gap: 12px; margin: 18px 0 6px; }
+.smart-sends .smart-import-progress-heading span, .smart-sends .smart-import-progress > p { font-size: 12px; color: #64748b; }
+.smart-sends .smart-import-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 18px 0 26px; }
+.smart-sends .smart-import-toolbar p { flex: 1 1 220px; font-size: 12px; }
+.smart-sends .smart-import-documents .smart-heading { margin-bottom: 0; align-items: center; }
+.smart-sends .smart-import-total { margin-left: 6px; color: #64748b; font-weight: 400; }
+.smart-sends .smart-import-documents label { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; }
+.smart-sends .smart-import-documents select { width: auto; padding: 7px 10px; }
+.smart-sends .smart-import .smart-upload-list { margin-top: 14px; padding: 0; border-top: 1px solid #e8edf3; }
+.smart-sends .smart-import .smart-upload-list.scrollable { max-height: 560px; overflow-y: auto; scrollbar-gutter: stable; padding-right: 6px; }
+.smart-sends .smart-import progress { appearance: none; border: 0; border-radius: 8px; overflow: hidden; background: #e8edf3; }
+.smart-sends .smart-import progress::-webkit-progress-bar { background: #e8edf3; border-radius: 8px; }
+.smart-sends .smart-import progress::-webkit-progress-value { background: #2563eb; border-radius: 8px; }
+.smart-sends .smart-import progress::-moz-progress-bar { background: #2563eb; border-radius: 8px; }
+.smart-sends .smart-import-file.complete progress::-webkit-progress-value { background: #059669; }
+.smart-sends .smart-import-file.complete progress::-moz-progress-bar { background: #059669; }
+.smart-sends .smart-import .smart-import-file { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 120px 32px; gap: 16px; align-items: center; padding: 16px 0; margin: 0; border-bottom: 1px solid #e8edf3; }
+.smart-sends .smart-import-filename { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.smart-sends .smart-import-filename > svg { flex: none; color: #8793a5; margin-top: 2px; }
+.smart-sends .smart-import-filename strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.smart-sends .smart-import-file-state { min-width: 0; overflow-wrap: anywhere; }
+.smart-sends .smart-import-file-state small { line-height: 1.5; }
+.smart-sends .smart-import-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 6px; font-size: 12px; background: #eef2f6; color: #475569; }
+.smart-sends .smart-import-badge svg { flex: none; }
+.smart-sends .smart-import-badge.complete { color: #065f46; background: #ecfdf5; }
+.smart-sends .smart-import-badge.failed { color: #9f1239; background: #fff1f2; }
+.smart-sends .smart-import-badge.processing { color: #1d4ed8; background: #eff6ff; }
+.smart-sends .smart-import-transfer { color: #64748b; font-size: 11px; font-variant-numeric: tabular-nums; }
+.smart-sends .smart-import-transfer progress { display: block; margin-top: 5px; height: 6px; }
+.smart-sends .smart-import-file.complete progress { accent-color: #059669; }
+.smart-sends .smart-import-pagination { display: flex; justify-content: flex-end; align-items: center; gap: 14px; margin-top: 18px; font-size: 12px; color: #64748b; }
+.smart-sends .smart-import-recovery { margin-top: 20px; font-size: 12px; max-width: 780px; }
+.smart-sends .smart-import-footer { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 16px; margin-top: 24px; padding-top: 20px; border-top: 1px solid #e8edf3; }
+.smart-sends .smart-import-footer > div:first-child { flex: 1 1 300px; }
+.smart-sends .smart-import-footer p { font-size: 12px; margin-top: 4px; }
+.smart-sends .smart-import-omitted { flex-basis: 100%; padding: 12px 14px; background: #fff7ed; border-radius: 8px; color: #9a3412; }
+.smart-sends .smart-import-omitted summary { cursor: pointer; font-weight: 600; }
+.smart-sends .smart-import-omitted ul { padding-left: 20px; list-style: disc; max-height: 180px; overflow-y: auto; overflow-wrap: anywhere; margin: 10px 0; }
+.smart-sends .smart-import-omitted .smart-check { margin: 10px 0 0; }
+@media (max-width: 800px) {
+  .smart-sends .smart-import .smart-import-file { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; gap: 10px; }
+  .smart-sends .smart-import-transfer { grid-column: 1 / 3; grid-row: 2; }
+  .smart-sends .smart-import-file-action { grid-column: 3; grid-row: 1; }
+}
+@media (max-width: 640px) {
+  .smart-sends .smart-import-step-label { display: none; }
+  .smart-sends .smart-import-counts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 10px; }
+  .smart-sends .smart-import-counts dd { font-size: 23px; }
+  .smart-sends .smart-import-counts dt { font-size: 11px; }
+  .smart-sends .smart-import-progress-heading { flex-direction: column; gap: 3px; }
+  .smart-sends .smart-import .smart-import-file { grid-template-columns: minmax(0, 1fr) 32px; }
+  .smart-sends .smart-import-file-state { grid-column: 1; grid-row: 2; }
+  .smart-sends .smart-import-transfer { grid-column: 1 / -1; grid-row: 3; }
+  .smart-sends .smart-import-file-action { grid-column: 2; }
+  .smart-sends .smart-import-documents .smart-heading { align-items: flex-start; }
+  .smart-sends .smart-import-documents label { flex-wrap: wrap; width: 100%; }
+  .smart-sends .smart-import-documents select { flex: 1; min-width: 0; }
+  .smart-sends .smart-import-toolbar button, .smart-sends .smart-import-footer > button { width: 100%; height: auto; min-height: 40px; white-space: normal; }
+  .smart-sends .smart-import-pagination { justify-content: space-between; gap: 6px; }
+  .smart-sends .smart-import-pagination span { text-align: center; }
+}

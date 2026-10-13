@@ -1,5 +1,44 @@
 # Auditoria prévia — Envios Inteligentes
 
+## Etapa 2 — redesign da importação (13/10/2026)
+
+A importação agora ocupa uma tela própria, aberta ao criar ou selecionar um lote editável. Cabeçalho, nome do lote, etapa e volta aos lotes acompanham o design existente do Prospecta. A tabela de identificação e a configuração de mensagem só aparecem após a ação de continuar. O conteúdo e a lógica das fases seguintes foram mantidos; foi acrescentada a navegação de volta à importação.
+
+Componentes extraídos para `components/smart-sends/`: `import-step.tsx`, `upload-dropzone.tsx`, `upload-progress.tsx`, `upload-file-list.tsx` e `import-state.ts`. Os limites exibidos vêm de `Detail.limits`, sem novos limites configuráveis fixados na interface. O guard de 500 metadados locais da etapa 1 permanece inalterado; não é apresentado como limite do lote.
+
+Os indicadores derivam da fila e dos documentos do backend, evitando contar duas vezes o mesmo registro presente nas duas fontes. Resultado confirmado com falha de análise não aparece como sucesso. Cada linha distingue transmissão de bytes, espera pela análise, conclusão, rejeição, recuperação pendente e resultado incerto. Documentos de lotes reabertos também aparecem sem depender da existência de uma fila local. Falhas têm filtro, mensagem por arquivo e lista explícita de pendências antes de avançar com os documentos disponíveis.
+
+A lista usa paginação de 25 linhas, área de rolagem com foco de teclado e linhas memoizadas com propriedades escalares e callback estável de remoção. Os totais incluem todas as páginas. Não há animações novas. Botões compartilhados, foco visível, controles nativos, progresso nomeado e anúncio resumido de contagens preservam navegação por teclado e legibilidade mobile.
+
+### Recuperação preservada
+
+`processImportQueue` recebeu apenas um callback opcional `shouldPause`, consultado antes de iniciar a próxima requisição, e uma proteção para não transmitir entradas incertas sem recuperação explícita. A pausa não aborta o XHR atual nem interrompe persistência/análise. Selecionar novos PDFs deixou de ativar implicitamente a recuperação de resultados incertos. A ação explícita continua usando snapshot, UUID/hash, resultado salvo e lease do backend já existentes.
+
+A remoção local só é permitida com fila parada e arquivo sem resultado persistido, sem progresso de transmissão e em estado aguardando/rejeitado. A fila é salva antes de remover a linha da interface. A retomada após reload mantém a necessidade de reselecionar os bytes dos PDFs. Continuar para identificação exige um documento disponível e, havendo pendências, ciência da lista de arquivos que ficam de fora por enquanto. Não modifica exclusões no servidor nem dispara envio Gmail.
+
+Não foram alterados contrato de API, serviços, Storage, banco, autenticação, cron, quotas ou lógica de envio. Não houve deploy nem uso de documentos reais.
+
+### Validação e evidências
+
+- **92 testes de unidade/integração aprovados**: regressões de contrato, importação, parser, banco, segurança e envio; novos casos de pausa entre requisições, retomada sem duplicação, bloqueio de reenvio implícito (inclusive PDF renomeado), contagens e elegibilidade/remoção.
+- **21 verificações de navegador aprovadas**, em Edge headless com os componentes reais montados pelo harness Vite já existente e APIs inteiramente simuladas. Cenários com 1/2/3/4/10/26/30/50/100 arquivos, falha da atualização final, 503 no documento 26, reload/reseleção, PDF renomeado com resultado incerto, erros recuperáveis e definitivos, pausa/remoção/retomada, avanço parcial por teclado, drag and drop, limites dinâmicos e reabertura sem metadados locais.
+- TypeScript e lint sem erros; build local concluído com `CLOUDFLARE_DEPLOY=1`, sem deploy. Permanecem avisos de chunks acima de 500 kB, tempos de plugins e classificação estática de rotas do Vinext.
+- Capturas locais em `outputs/smart-qa/`: `desktop-import-empty.png`, `desktop-import-complete.png`, `mobile-import-complete.png`, `desktop-import-paused.png`, `desktop-import-errors.png`, `mobile-import-errors.png`, `desktop-import-100.png` e `mobile-import-100.png`. Relatório em `report.json`; artefatos ignorados pelo Git. Capturas desktop e mobile foram inspecionadas visualmente.
+
+Comandos reproduzíveis:
+
+```powershell
+node --test scripts/test-smart-import-view.mjs scripts/test-smart-import-contract.mjs scripts/test-smart-import.mjs scripts/test-smart-foundation.mjs scripts/test-smart-sends.mjs scripts/test-smart-security.mjs scripts/test-smart-worker.mjs scripts/test-smart-company-picker.mjs
+node node_modules/typescript/bin/tsc --noEmit
+node node_modules/eslint/bin/eslint.js . --ignore-pattern dist --ignore-pattern .next
+$env:CLOUDFLARE_DEPLOY='1'; node scripts/run-framework.mjs build
+# Em terminais separados; todas as APIs são interceptadas:
+node scripts/email-ui-harness.mjs
+node scripts/test-smart-ui.mjs
+```
+
+Limitação da validação visual: o servidor de desenvolvimento com Worker não ficou acessível nesta sessão; o teste usou o harness local existente. Build, regressões dos serviços e teste do parser em workerd passaram separadamente. As capturas não validam latência ou serviços de produção.
+
 ## Correção da validação de IDs na importação
 
 A divergência foi reproduzida **antes da alteração**: `importSnapshot("1")` recebendo o JSON `{ "batchId": 1, "items": [] }` falhava com `INVALID_RESPONSE` e a mensagem “Não foi possível verificar os documentos do lote.” O `z.literal(batchId)` preservava o tipo string recebido em runtime, apesar da assinatura TypeScript declarar `number`. O serviço de detalhe repassava `batch.id` sem normalização, enquanto o progresso usava `Number(batch.id)`. Isso confirma o defeito de contrato; não foi acessada uma resposta de produção para comprovar que o driver retornou string na ocorrência relatada.
