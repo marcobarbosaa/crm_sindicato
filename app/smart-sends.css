@@ -109,3 +109,19 @@
   .smart-sends .smart-import-pagination { justify-content: space-between; gap: 6px; }
   .smart-sends .smart-import-pagination span { text-align: center; }
 }
+.smart-batch-filters { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; }
+.smart-batch-list { display: grid; gap: 12px; padding: 0; list-style: none; }
+.smart-batch-list > li { display: flex; align-items: flex-start; gap: 16px; padding: 20px; border: 1px solid var(--border); border-radius: 12px; }
+.smart-batch-info { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.smart-batch-info strong, .smart-batch-info small { display: block; }
+.smart-batch-info small, .smart-batch-info p { color: var(--muted-foreground); margin: 6px 0; }
+.smart-batch-actions { display: flex; gap: 12px; align-items: center; }
+.smart-batch-actions summary { cursor: pointer; padding: 8px; }
+.smart-delete-action { color: var(--destructive); padding: 10px; cursor: pointer; }
+.smart-deletion-preview { max-height: 40vh; overflow: auto; padding-left: 20px; }
+.smart-deletion-preview li { margin-bottom: 12px; overflow-wrap: anywhere; }
+@media (max-width: 680px) {
+  .smart-batch-filters { grid-template-columns: 1fr; }
+  .smart-batch-list > li { flex-wrap: wrap; padding: 12px; }
+  .smart-batch-actions { width: 100%; justify-content: flex-end; }
+}

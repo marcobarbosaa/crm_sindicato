@@ -19,6 +19,7 @@ const timestampMs = customType<{ data: Date; driverData: number }>({
 
 export const documentSendBatches = pgTable('document_send_batches', {
   id: serial('id').primaryKey(), ownerId: text('owner_id').notNull(), name: text('name').notNull(),
+  deletionRequestedAt: timestampMs('deletion_requested_at'), deletedAt: timestampMs('deleted_at'), deletionError: text('deletion_error'),
   status: text('status').notNull().default('DRAFT'), revision: integer('revision').notNull().default(0),
   templateId: integer('template_id').references(() => emailTemplates.id, { onDelete: 'set null' }), templateName: text('template_name'), senderAddress: text('sender_address'), accountId: integer('account_id').references(() => emailAccounts.id, { onDelete: 'set null' }),
   commonAttachments: jsonb('common_attachments').$type<import('../lib/attachments').Attachment[]>().notNull().default([]),
@@ -26,9 +27,11 @@ export const documentSendBatches = pgTable('document_send_batches', {
   lockToken: text('lock_token'), lockUntil: timestampMs('lock_until'), notice: text('notice'),
   confirmedAt: timestampMs('confirmed_at'), completedAt: timestampMs('completed_at'),
   createdAt: timestampMs('created_at').notNull(), updatedAt: timestampMs('updated_at').notNull(),
-}, t => [index('idx_document_batches_due').on(t.status, t.nextRunAt), index('idx_document_batches_owner').on(t.ownerId, t.createdAt)]);
+}, t => [index('idx_document_batches_due').on(t.status, t.nextRunAt), index('idx_document_batches_owner').on(t.ownerId, t.createdAt),
+  index('idx_document_batches_deletion').on(t.updatedAt).where(sql`${t.deletionRequestedAt} is not null and ${t.deletedAt} is null`)]);
 export const documentSendItems = pgTable('document_send_items', {
   id: text('id').primaryKey(), ownerId: text('owner_id').notNull(), batchId: integer('batch_id').notNull().references(() => documentSendBatches.id),
+  importActiveAt: timestampMs('import_active_at'),
   fileName: text('file_name').notNull(), fileSize: integer('file_size').notNull(), contentHash: text('content_hash').notNull(), storageKey: text('storage_key').notNull().unique(),
   fileReady: boolean('file_ready').notNull().default(false), readable: boolean('readable').notNull().default(false), removedAt: timestampMs('removed_at'), fileDeletedAt: timestampMs('file_deleted_at'),
   duplicateOf: text('duplicate_of'), companyId: integer('company_id').references(() => companies.id, { onDelete: 'set null' }), companyName: text('company_name'), companyCnpj: text('company_cnpj'), recipient: text('recipient'),
@@ -42,7 +45,8 @@ export const documentSendItems = pgTable('document_send_items', {
   deliveryCheckedAt: timestampMs('delivery_checked_at'), deliveryNextAt: timestampMs('delivery_next_at'), deliveryPageToken: text('delivery_page_token'), deliveryBefore: timestampMs('delivery_before'), deliveryIncomplete: boolean('delivery_incomplete').notNull().default(false),
   deliveryLockToken: text('delivery_lock_token'), deliveryLockUntil: timestampMs('delivery_lock_until'),
   createdAt: timestampMs('created_at').notNull(), updatedAt: timestampMs('updated_at').notNull(),
-}, t => [index('idx_document_items_batch').on(t.ownerId, t.batchId), index('idx_document_items_hash').on(t.ownerId, t.contentHash), index('idx_document_items_delivery').on(t.sendStatus, t.deliveryNextAt)]);
+}, t => [index('idx_document_items_batch').on(t.ownerId, t.batchId), index('idx_document_items_hash').on(t.ownerId, t.contentHash), index('idx_document_items_delivery').on(t.sendStatus, t.deliveryNextAt),
+  index('idx_document_items_duplicate').on(t.duplicateOf).where(sql`${t.duplicateOf} is not null`)]);
 export const documentSendDeliveryEvents = pgTable('document_send_delivery_events', {
   id: serial('id').primaryKey(), itemId: text('item_id').notNull().references(() => documentSendItems.id), ownerId: text('owner_id').notNull(),
   gmailMessageId: text('gmail_message_id').notNull(), status: text('status').notNull(), category: text('category').notNull(), diagnostic: text('diagnostic'), createdAt: timestampMs('created_at').notNull(),

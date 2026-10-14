@@ -11,11 +11,13 @@ import { readPdfText } from './pdf-text';
 import { GMAIL_SEND_SCOPE } from './gmail';
 import { importResult, IMPORT_LEASE_MS } from './smart-import-protocol';
 import { parseSmartContract, smartNumericId } from './smart-send-contract';
+import { lockBatchImports, processBatchDeletion } from './smart-batch-management';
 export const ownedBatch = (owner: string, id: number) => and(eq(batches.ownerId, owner), eq(batches.id, id));
 export const ownedItems = (owner: string, id: number) => and(eq(items.ownerId, owner), eq(items.batchId, id));
 export async function requireBatch(owner: string, id: number, tx: Transaction) {
   const [batch] = await tx.select().from(batches).where(ownedBatch(owner, id)).for('update');
   if (!batch) throw new SmartSendError('Lote não encontrado.', 404);
+  if (batch.deletionRequestedAt) throw new SmartSendError('Lote em exclusão ou já excluído.', 409);
   return batch;
 }
 function editable(batch: typeof batches.$inferSelect) {
@@ -28,6 +30,7 @@ export async function getSmartBatch(owner: string, id: number) {
   const db = getDb();
   const [batch] = await db.select().from(batches).where(ownedBatch(owner, id));
   if (!batch) throw new SmartSendError('Lote não encontrado.', 404);
+  if (batch.deletionRequestedAt) throw new SmartSendError('Lote em exclusão ou já excluído.', 409);
   const rows = await db.select().from(items).where(and(ownedItems(owner, id), isNull(items.removedAt))).orderBy(asc(items.createdAt));
   const [settings] = await db.select().from(crmSettings).where(eq(crmSettings.ownerId, owner));
   const [account] = await db.select({ email: emailAccounts.email }).from(emailAccounts).where(and(eq(emailAccounts.ownerId, owner), eq(emailAccounts.provider, 'GMAIL')));
@@ -50,8 +53,9 @@ export async function smartCatalog(owner: string, search?: string) {
 }
 export async function getSmartImportStatus(owner: string, batchId: number) {
   const db = getDb();
-  const [batch] = await db.select({ id: batches.id }).from(batches).where(ownedBatch(owner, batchId));
+  const [batch] = await db.select({ id: batches.id, deletionRequestedAt: batches.deletionRequestedAt }).from(batches).where(ownedBatch(owner, batchId));
   if (!batch) throw new SmartSendError('Lote não encontrado.', 404);
+  if (batch.deletionRequestedAt) throw new SmartSendError('Lote em exclusão ou já excluído.', 409);
   // No rendered emails, recipients, suggestions, storage keys or delivery metadata.
   const rows = await db.select({ id: items.id, contentHash: items.contentHash, fileReady: items.fileReady,
     fileDeletedAt: items.fileDeletedAt, removedAt: items.removedAt, duplicateOf: items.duplicateOf,
@@ -63,6 +67,7 @@ export async function uploadSmartPdf(owner: string, batchId: number, name: strin
   if (new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') throw new SmartSendError('Assinatura PDF inválida.');
   const hash = await contentHash(bytes), id = uploadId || crypto.randomUUID(), now = new Date(), db = getDb();
   const reservation = await db.transaction(async tx => {
+    await lockBatchImports(tx, owner);
     const batch = await requireBatch(owner, batchId, tx); editable(batch);
     // Same content imported into different batches is serialized too.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${owner + ':' + hash}, 0))`);
@@ -70,7 +75,7 @@ export async function uploadSmartPdf(owner: string, batchId: number, name: strin
     if (existing) {
       if (existing.ownerId !== owner || existing.batchId !== batchId || existing.contentHash !== hash) throw new SmartSendError('Identificador de importação incompatível.', 409);
       if (!recover || !importResult(existing).recoverable || (existing.reviewStatus === 'UPLOADING' && +existing.updatedAt > Date.now() - IMPORT_LEASE_MS)) return { row: existing, process: false };
-      const [claimed] = await tx.update(items).set({ reviewStatus: 'UPLOADING', readable: false, confirmedAt: null, updatedAt: now }).where(eq(items.id, id)).returning();
+      const [claimed] = await tx.update(items).set({ reviewStatus: 'UPLOADING', importActiveAt: now, readable: false, confirmedAt: null, updatedAt: now }).where(eq(items.id, id)).returning();
       await invalidate(tx, owner, batchId);
       return { row: claimed, process: true };
     }
@@ -81,7 +86,7 @@ export async function uploadSmartPdf(owner: string, batchId: number, name: strin
       or(isNull(items.fileDeletedAt), inArray(items.sendStatus, ['SENT', 'UNCERTAIN'])))).limit(1);
     const [item] = await tx.insert(items).values({ id, ownerId: owner, batchId, fileName: name, fileSize: bytes.length, contentHash: hash,
       storageKey: `smart-sends/${id}.pdf`, rfcMessageId: `<${id}@smart.prospecta.invalid>`, duplicateOf: duplicate?.id || null,
-      reviewStatus: duplicate ? 'DUPLICATE' : 'UPLOADING', error: duplicate ? 'Documento já importado ou enviado.' : null, createdAt: now, updatedAt: now }).returning();
+      reviewStatus: duplicate ? 'DUPLICATE' : 'UPLOADING', importActiveAt: duplicate ? null : now, error: duplicate ? 'Documento já importado ou enviado.' : null, createdAt: now, updatedAt: now }).returning();
     await invalidate(tx, owner, batchId); return { row: item, process: !item.duplicateOf };
   });
   const row = reservation.row;
@@ -116,13 +121,13 @@ export async function uploadSmartPdf(owner: string, batchId: number, name: strin
       const changed = await tx.update(items).set({ fileReady: true, readable: reading.readable, extractedCnpjs: match.cnpjs, candidates: match.candidates,
         companyId: company?.id || null, companyName: company?.name || null, companyCnpj: company?.cnpj || null, recipient: company?.primaryEmail?.trim().toLowerCase() || null,
         identificationMethod: match.method, reviewStatus: !reading.readable ? 'READ_ERROR' : company ? recipientReview(company) : match.status,
-        error: reading.error, updatedAt: new Date() }).where(lease).returning({ id: items.id });
+        error: reading.error, importActiveAt: null, updatedAt: new Date() }).where(lease).returning({ id: items.id });
       if (!changed.length) throw new SmartSendError('A importação foi alterada. Reconcilie o lote.', 409);
       await invalidate(tx, owner, batchId);
     });
   } catch {
     // Preserve proven storage state; never delete a record/object to hide a failure.
-    await db.update(items).set({ fileReady: stored, readable: false, reviewStatus: 'READ_ERROR', error: stored ? 'IMPORT_ANALYSIS_FAILED' : 'IMPORT_STORAGE_FAILED', updatedAt: new Date() }).where(lease);
+    await db.update(items).set({ fileReady: stored, readable: false, reviewStatus: 'READ_ERROR', importActiveAt: null, error: stored ? 'IMPORT_ANALYSIS_FAILED' : 'IMPORT_STORAGE_FAILED', updatedAt: new Date() }).where(lease);
   }
   const [finished] = await db.select().from(items).where(and(ownedItems(owner, batchId), eq(items.id, id)));
   return importResult(finished);
@@ -132,6 +137,7 @@ export async function reviewSmartItem(owner: string, batchId: number, id: string
     editable(await requireBatch(owner, batchId, tx));
     const [item] = await tx.select().from(items).where(and(ownedItems(owner, batchId), eq(items.id, id), isNull(items.removedAt))).for('update');
     if (!item) throw new SmartSendError('Documento não encontrado.', 404);
+    if (item.importActiveAt || item.reviewStatus === 'UPLOADING') throw new SmartSendError('Aguarde ou reconcilie a importação antes de alterar o documento.', 409);
     if (input.remove) await tx.update(items).set({ removedAt: new Date(), excluded: true, confirmedAt: null }).where(eq(items.id, id));
     else {
       const companyId = input.companyId ?? item.companyId;
@@ -199,10 +205,15 @@ export async function controlSmartBatch(owner: string, id: number, action: strin
   });
 }
 export async function cleanupSmartFiles() {
+  // Alternate opportunities, never add deletion work to a retention chunk.
+  if (Math.floor(Date.now() / (8 * 60_000)) % 2 === 0) {
+    const deletion = await processBatchDeletion();
+    if (deletion) return deletion;
+  }
   const db = getDb(), limits = smartLimits(storageConfig), now = Date.now();
   return db.transaction(async tx => {
     // Lock parent first, matching upload/review/confirmation and preventing retention races.
-    const candidates = await tx.select().from(batches).where(and(sql`exists (select 1 from ${items} where ${items.batchId} = ${batches.id} and ${items.fileDeletedAt} is null and ${items.sendStatus} not in ('PROCESSING','PENDING','UNCERTAIN'))`, or(
+    const candidates = await tx.select().from(batches).where(and(isNull(batches.deletionRequestedAt), sql`exists (select 1 from ${items} where ${items.batchId} = ${batches.id} and ${items.fileDeletedAt} is null and ${items.sendStatus} not in ('PROCESSING','PENDING','UNCERTAIN'))`, or(
       and(inArray(batches.status, ['DRAFT', 'READY']), lte(batches.updatedAt, new Date(now - limits.draftHours * 3600_000))),
       and(inArray(batches.status, ['COMPLETED', 'CANCELLED']), or(lte(batches.completedAt, new Date(now - limits.retentionDays * 86400_000)), eq(batches.notice, 'Rascunho expirado; documentos removidos.'))),
       sql`exists (select 1 from ${items} where ${items.batchId} = ${batches.id} and ${items.removedAt} is not null and ${items.fileDeletedAt} is null)`

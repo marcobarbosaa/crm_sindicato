@@ -71,6 +71,9 @@ const entrySchema = z.object({ id: z.string().uuid(), hash: z.string().regex(/^[
   progress: z.number().min(0).max(100), phase: z.enum(['queued', 'sending', 'uncertain', 'confirmed', 'rejected']), state: z.string(), result: resultSchema.optional() });
 export type ImportEntry = z.infer<typeof entrySchema>;
 const queueKey = (id: number) => `smart-import:v1:${id}`;
+export function clearImportQueue(storage: Pick<Storage, 'removeItem'>, batchId: number) {
+  storage.removeItem(queueKey(batchId));
+}
 export function saveImportQueue(storage: Pick<Storage, 'setItem'>, batchId: number, entries: ImportEntry[]) {
   storage.setItem(queueKey(batchId), JSON.stringify(entries));
 }

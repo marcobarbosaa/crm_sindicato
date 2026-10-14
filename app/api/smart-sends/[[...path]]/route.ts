@@ -9,6 +9,7 @@ import { SmartSendError, csvCell, smartLimits } from '@/lib/smart-send-policy';
 import { storageConfig } from '@/lib/attachment-storage';
 import { AttachmentError } from '@/lib/attachments';
 import { normalizeSmartApiIds, smartNumericId } from '@/lib/smart-send-contract';
+import { batchDeletionStatus, listSmartBatches, previewBatchDeletion, requestBatchDeletion } from '@/lib/smart-batch-management';
 import { controlSmartBatch, getSmartBatch, getSmartImportStatus, ownedItems, prepareSmartBatch, reviewSmartItem, smartCatalog, uploadSmartPdf } from '@/lib/smart-send-service';
 type Context = { params: Promise<{ path?: string[] }> };
 const idSchema = smartNumericId;
@@ -19,8 +20,24 @@ async function handle(request: NextRequest, context: Context) {
     return await withCampaignDb(async () => {
       const db = getDb(), method = request.method;
       const response = (value: unknown, status = 200) => NextResponse.json(normalizeSmartApiIds(path.join('/'), value), { status, headers: { 'cache-control': 'private, no-store' } });
+      if (path.length === 1 && path[0] === 'batches' && method === 'GET') {
+        const params = new URL(request.url).searchParams;
+        const input = z.object({ search: z.string().max(100), status: z.enum(['', 'DRAFT', 'READY', 'RUNNING', 'PAUSED', 'COMPLETED', 'CANCELLED', 'DELETING']),
+          page: z.coerce.number().int().min(0).max(100000), oldest: z.boolean() }).parse({ search: params.get('search') || '', status: params.get('status') || '', page: params.get('page') || 0, oldest: params.get('order') === 'oldest' });
+        return response(await listSmartBatches(owner, input));
+      }
+      if (path.length === 1 && path[0] === 'deletion-preview' && method === 'POST') {
+        const input = z.object({ ids: z.array(z.number().int().positive().safe()).min(1).max(5) }).strict().parse(await json(request));
+        return response(await previewBatchDeletion(owner, input.ids));
+      }
+      if (path.length === 1 && path[0] === 'deletion-request' && method === 'POST') {
+        const input = z.object({ confirmed: z.literal(true), batches: z.array(z.object({ id: z.number().int().positive().safe(),
+          revision: z.number().int().nonnegative(), documents: z.number().int().nonnegative() }).strict()).min(1).max(5)
+          .refine(rows => new Set(rows.map(r => r.id)).size === rows.length) }).strict().parse(await json(request));
+        return response(await requestBatchDeletion(owner, input.batches), 202);
+      }
       if (!path.length) {
-        if (method === 'GET') return response(await db.select({ id: batches.id, name: batches.name, status: batches.status, createdAt: batches.createdAt }).from(batches).where(eq(batches.ownerId, owner)).orderBy(desc(batches.createdAt)).limit(100));
+        if (method === 'GET') return response(await db.select({ id: batches.id, name: batches.name, status: batches.status, createdAt: batches.createdAt }).from(batches).where(and(eq(batches.ownerId, owner), isNull(batches.deletionRequestedAt))).orderBy(desc(batches.createdAt)).limit(100));
         if (method === 'POST') {
           const input = z.object({ name: z.string().trim().min(1).max(100) }).strict().parse(await json(request));
           const now = new Date();
@@ -31,6 +48,7 @@ async function handle(request: NextRequest, context: Context) {
       if (method === 'GET' && path.length === 1 && path[0] === 'templates') return response(await smartCatalog(owner));
       if (method === 'GET' && path.length === 1 && path[0] === 'companies') return response(await smartCatalog(owner, request.nextUrl.searchParams.get('search') || ''));
       const id = idSchema.parse(path[0]);
+      if (method === 'GET' && path.length === 2 && path[1] === 'deletion') return response(await batchDeletionStatus(owner, id));
       if (method === 'GET' && path.length === 1) return response(await getSmartBatch(owner, id));
       if (method === 'GET' && path.length === 2 && path[1] === 'import-status') return response(await getSmartImportStatus(owner, id));
       if (method === 'GET' && path.length === 2 && path[1] === 'report') {

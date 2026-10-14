@@ -1,7 +1,8 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, FileUp, Plus, RefreshCw, Send, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Plus, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BatchManager } from '@/components/smart-sends/batch-manager';
 import { ImportStep } from '@/components/smart-sends/import-step';
 import { canRemoveUpload } from '@/components/smart-sends/import-state';
 import { formatFileSize, type Attachment } from '@/lib/attachments';
@@ -36,7 +37,7 @@ function CompanyPicker({ item, disabled, onChoose }: { item: Item; disabled: boo
   return <details className="smart-associate"><summary>Associar empresa</summary>{!!item.suggestions?.length && <ul aria-label="Sugestões de empresas">{item.suggestions.map(c => <li key={c.id}><button disabled={disabled} onClick={() => chooseCompany(c.id)}>{c.name}<small>{c.primaryEmail || "Sem e-mail"}</small></button></li>)}</ul>}<label>Buscar empresa para {item.fileName}<input disabled={disabled} value={query} onChange={e => { setQuery(e.target.value); setRows([]); }} placeholder="Nome ou CNPJ" /></label>{error && <p role="alert">{error}</p>}{query && <ul>{rows.map(c => <li key={c.id}><button disabled={disabled} onClick={() => chooseCompany(c.id)}>{c.name}<small>{c.cnpj} · {c.primaryEmail || 'Sem e-mail'}</small></button></li>)}</ul>}</details>;
 }
 export function SmartSendsPage() {
-  const [history, setHistory] = useState<Batch[]>([]), [data, setData] = useState<Detail | null>(null), [templates, setTemplates] = useState<Template[]>([]);
+  const [data, setData] = useState<Detail | null>(null), [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState(''), [includeCommon, setIncludeCommon] = useState(false), [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [loading, setLoading] = useState(true), [uploads, setUploads] = useState<ImportEntry[]>([]);
   const [preview, setPreview] = useState<string | null>(null), [importStep, setImportStep] = useState(true);
@@ -45,8 +46,8 @@ export function SmartSendsPage() {
   const selectedFiles = useRef(new Map<string, File>());
   const latestUploads = useRef(uploads);
   useEffect(() => { latestUploads.current = uploads; }, [uploads]);
-  const refresh = useCallback(async (id: number) => { const next = await api<Detail>('/' + id); setData(next); setHistory(rows => rows.map(row => row.id === next.batch.id ? next.batch : row)); return next; }, []);
-  useEffect(() => { let active = true; Promise.all([api<Batch[]>(''), api<Template[]>('/templates')]).then(([b, t]) => { if (active) { setHistory(b); setTemplates(t); } }).catch(e => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
+  const refresh = useCallback(async (id: number) => { const next = await api<Detail>('/' + id); setData(next); return next; }, []);
+  useEffect(() => { let active = true; api<Template[]>('/templates').then(t => { if (active) setTemplates(t); }).catch(e => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
   const batchId = data?.batch.id, batchStatus = data?.batch.status;
   useEffect(() => { if (!batchId || !['RUNNING', 'PAUSED', 'CANCELLED', 'COMPLETED'].includes(batchStatus || '')) return; const timer = setInterval(() => { void refresh(batchId).catch(() => setError('Não foi possível atualizar o progresso.')); }, 8000); return () => clearInterval(timer); }, [batchId, batchStatus, refresh]);
   const run = async (work: () => Promise<void>) => { setBusy(true); setError(''); setConfirmed(false); try { await work(); } catch (e) { setError(e instanceof Error ? e.message : 'Falha na operação.'); } finally { setBusy(false); } };
@@ -55,7 +56,7 @@ export function SmartSendsPage() {
     try { setUploads(restoreImportQueue(localStorage, id)); }
     catch { setError('Não foi possível ler a fila local. Selecione os PDFs novamente; cada hash será conferido no servidor.'); }
   }
-  async function create() { await run(async () => { const b = await api<{ id: number }>('', { name: `Documentos — ${new Date().toLocaleString('pt-BR')}` }); await refresh(b.id); selectedFiles.current.clear(); setUploads([]); setImportStep(true); setPaused(false); pauseRequested.current = false; setTemplateId(''); setIncludeCommon(false); setHistory(await api<Batch[]>('')); }); }
+  async function create() { await run(async () => { const b = await api<{ id: number }>('', { name: `Documentos — ${new Date().toLocaleString('pt-BR')}` }); await refresh(b.id); selectedFiles.current.clear(); setUploads([]); setImportStep(true); setPaused(false); pauseRequested.current = false; setTemplateId(''); setIncludeCommon(false); }); }
   async function upload(files: File[], recover = false) {
     if (!data || uploadGuard.current || busy) return;
     uploadGuard.current = true; setBusy(true); setImporting(true); setValidating(files.length > 0); setError(''); setConfirmed(false);
@@ -105,8 +106,11 @@ export function SmartSendsPage() {
   const step = !data || showingImport ? 0 : !editing ? 4 : ready ? 3 : 1;
   return <div className="smart-sends">{data && <Button className="smart-back" variant="ghost" disabled={busy} onClick={() => { setData(null); setUploads([]); setError(''); selectedFiles.current.clear(); }}><ArrowLeft aria-hidden="true" />Voltar aos lotes</Button>}<section className="page-intro compact"><div><p className="eyebrow">DOCUMENTOS PERSONALIZADOS</p><h1>Envios Inteligentes</h1><p>{data ? data.batch.name : 'Importe PDFs, revise os destinatários e acompanhe cada envio.'}</p></div><Button onClick={create} disabled={busy || loading}><Plus />Novo lote</Button></section>
     {data && <ol className="smart-steps" aria-label="Etapas do envio">{['Importação', 'Identificação', 'Revisão', 'Confirmação', 'Acompanhamento'].map((s, i) => <li key={s} aria-current={i === step ? 'step' : undefined} className={i === step ? 'current' : i < step ? 'done' : ''}><span>{i + 1}</span>{s}</li>)}</ol>}
-    {error && <div className="smart-error" role="alert">{error}<Button variant="outline" size="sm" onClick={() => void run(async () => { if (batchId) await refresh(batchId); else { setHistory(await api<Batch[]>('')); setTemplates(await api<Template[]>('/templates')); } })} disabled={busy}>Tentar novamente</Button></div>}
-    {loading ? <p role="status">Carregando Envios Inteligentes…</p> : !data && <section className="panel smart-panel"><label>Lotes recentes<select disabled={busy} value="" onChange={e => e.target.value && void run(() => openBatch(Number(e.target.value)))}><option value="">Selecione um lote</option>{history.map(b => <option key={b.id} value={b.id}>{b.name} · {labels[b.status] || b.status}</option>)}</select></label><div className="smart-empty"><FileUp size={36} /><h2>Um documento, o destinatário certo</h2><p>Crie um lote para importar arquivos. Você aprova cada associação antes de iniciar os envios.</p></div></section>}
+    {error && <div className="smart-error" role="alert">{error}<Button variant="outline" size="sm" onClick={() => void run(async () => { if (batchId) await refresh(batchId); else { setTemplates(await api<Template[]>('/templates')); } })} disabled={busy}>Tentar novamente</Button></div>}
+    {loading ? <p role="status">Carregando Envios Inteligentes...</p> : !data && <BatchManager disabled={busy} onOpen={id => void run(() => openBatch(id))} onDeleted={ids => {
+      if (batchId && ids.includes(batchId)) { setData(null); setUploads([]); selectedFiles.current.clear(); }
+    }} />}
+
     {data && showingImport && <ImportStep key={data.batch.id} entries={uploads} documents={data.items} limits={data.limits} busy={busy} importing={importing} validating={validating} paused={paused}
       onSelect={files => void upload(files)} onPause={() => { pauseRequested.current = true; setPaused(true); }} onResume={() => void upload([])} onRecover={() => void upload([], true)} onRemove={removeUpload} onContinue={() => { setImportStep(false); requestAnimationFrame(() => document.getElementById('smart-batch-heading')?.focus()); }} />}
     {data && !showingImport && <><section className="panel smart-panel"><div className="smart-heading"><div><h2 id="smart-batch-heading" tabIndex={-1}>{data.batch.name}</h2><p>{labels[data.batch.status]}</p></div>{editing && <Button variant="outline" disabled={busy} onClick={() => setImportStep(true)}><ArrowLeft aria-hidden="true" />Voltar à importação</Button>}<Button variant="outline" disabled={busy} onClick={() => void run(async () => { await refresh(data.batch.id); })}><RefreshCw />Atualizar</Button></div>

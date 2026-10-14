@@ -25,6 +25,7 @@ async function mock({ requestId, request }) {
   const path = new URL(request.url).pathname; requests.push({ path, method: request.method }); let body = [], status = 200;
   if (path === '/api/dashboard') body = { total: 0, activities: [] };
   else if (path === '/api/smart-sends') { if (request.method === 'POST') { exists = true; data.items = []; imports.length = 0; data.batch.status = 'DRAFT'; body = { id: 1 }; } else body = exists ? [data.batch] : []; }
+  else if (path === '/api/smart-sends/batches') body = { rows: exists ? [{ ...data.batch, createdAt: new Date().toISOString(), documents: data.items.length, pendingReview: data.items.length, sent: 0, pendingFiles: 0, deletionRequestedAt: null, deletionError: null }] : [], hasMore: false };
   else if (path === '/api/smart-sends/templates') body = [template];
   else if (path === '/api/smart-sends/companies') body = [{ id: 2, name: 'Empresa Beta', primaryEmail: 'beta@example.test', cnpj: '11444777000161' }];
   else if (path.endsWith('/upload')) {
@@ -140,8 +141,8 @@ try {
   checks.push('renaming an uncertain PDF does not create a new queue entry or retry it');
   await send('Page.reload');
   await waitFor("[...document.querySelectorAll('nav button')].some(b=>b.textContent.trim()==='Envios Inteligentes')"); await click('Envios Inteligentes');
-  await waitFor("[...document.querySelectorAll('.smart-sends select option')].some(o=>o.value==='1')");
-  await evaluate("(()=>{const s=document.querySelector('.smart-sends select');s.value='1';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  await waitFor("[...document.querySelectorAll('.smart-batch-list button')].some(b=>b.textContent.trim()==='Abrir lote')");
+  await click('Abrir lote');
   await waitFor("document.querySelectorAll('.smart-upload-list li').length===25 && !document.querySelector('#smart-files').disabled");
   await click('Tentar novamente falhas recuperáveis'); assert.equal(imports.length, 29);
   await selectVolume(30);
@@ -196,7 +197,7 @@ try {
   await evaluate("localStorage.removeItem('smart-import:v1:1')");
   data.limits = { ...data.limits, batchFiles: 7, fileBytes: 2097152, pages: 12 };
   await click('Voltar aos lotes');
-  await evaluate("(()=>{const s=document.querySelector('.smart-sends select');s.value='1';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  await click('Abrir lote');
   await waitFor("document.querySelector('#smart-import-limits')?.textContent.includes('7 documentos')");
   assert.equal(await evaluate("document.querySelector('#smart-import-limits').textContent.includes('2 MB') && document.querySelector('#smart-import-limits').textContent.includes('12 páginas')"), true);
   checks.push('document, byte and page limits reflect backend configuration');
@@ -210,7 +211,7 @@ try {
   assert.equal(imports.length, 1); checks.push('drag and drop starts import using the same validation and queue');
   await evaluate("localStorage.removeItem('smart-import:v1:1')");
   await click('Voltar aos lotes');
-  await evaluate("(()=>{const s=document.querySelector('.smart-sends select');s.value='1';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  await click('Abrir lote');
   await waitFor("document.querySelector('[data-count=Concluídos] dd')?.textContent==='1' && !document.querySelector('#smart-files').disabled");
   checks.push('reopened batch displays server documents even without browser queue metadata');
   assert.equal(requests.filter(r => r.path.endsWith('/control')).length, controlsBefore);
