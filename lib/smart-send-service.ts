@@ -170,9 +170,9 @@ export async function controlSmartBatch(owner: string, id: number, action: strin
     } else throw new SmartSendError('Ação incompatível com o estado atual.', 409);
   });
 }
-export async function cleanupSmartFiles() {
+export async function cleanupSmartFiles(scheduledTime = Date.now()) {
   // Alternate opportunities, never add deletion work to a retention chunk.
-  if (Math.floor(Date.now() / (8 * 60_000)) % 2 === 0) {
+  if (Math.floor(scheduledTime / (8 * 60_000)) % 2 === 0) {
     const deletion = await processBatchDeletion();
     if (deletion) return deletion;
   }

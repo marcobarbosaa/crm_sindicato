@@ -11,13 +11,21 @@ const realFetch = globalThis.fetch;
 let options, objects, sends, encoded;
 const config = key => ({ SMART_SEND_ALLOW_LOCAL: 'true' })[key];
 const storage = { async put(key, bytes) { if (options.uploadFail) throw Error('storage'); await options.holdUpload?.(); objects.set(key, new Uint8Array(bytes)); if (options.lostStorageResponse) throw Error('timeout after save'); }, async get(key) { if (options.storageFail) throw Error('storage'); if (!objects.has(key)) throw new (load('lib/smart-send-policy.ts').SmartSendError)('missing', 404); return objects.get(key); }, async remove(key) { if (options.deleteFail) throw Error('storage unavailable'); objects.delete(key); if (options.deleteTimeout) throw new DOMException('timeout after removal', 'TimeoutError'); } };
+storage.removeMany = async keys => {
+  (options.deleteGroups ||= []).push([...keys]);
+  await options.holdDelete?.();
+  const confirmed = keys.slice(0, options.deletePartial ?? keys.length);
+  for (const key of confirmed) await storage.remove(key);
+  await options.afterDelete?.();
+  return confirmed;
+};
 const actualGmail = loader()('lib/gmail.ts');
 const storageModule = loader({ 'cloudflare:workers': { env: {} } })('lib/smart-send-storage.ts');
 const gmailMock = { ...actualGmail, decryptToken: async () => 'synthetic', refreshAccessToken: async () => { if (options.oauthFail) throw new actualGmail.GmailOAuthError(400, 'invalid_grant'); await options.beforeBarrier?.(); return 'mock-token'; }, encodeRawEmail: args => { encoded.push(args); return actualGmail.encodeRawEmail(args); } };
 const load = loader({ '@/db': { getDb: () => db, withCampaignDb: fn => fn() }, '@/db/schema': schema, unpdf,
   './attachment-storage': { storageConfig: config, attachmentStorage: () => ({ ...storage, get: async key => objects.get(key) }) },
   '@/lib/attachment-storage': { storageConfig: config },
-  './smart-send-storage': { ...storageModule, smartStorage: () => storage },
+  './smart-send-storage': { ...storageModule, smartStorage: () => storage, smartDeletionLimit: () => options.deleteLimit || 5 },
   './gmail': gmailMock, '@/lib/gmail': gmailMock,
   './gmail-delivery-client': { DeliverySyncError: class extends Error { constructor(code) { super(code); this.code = code; } },
     listDeliveryCandidates: async () => ({ ids: options.bounce ? ['bounce-1'] : [], nextPageToken: null }),
@@ -86,13 +94,106 @@ test('empty batch is removed from listing and keeps only an idempotent receipt',
   assert.equal((await preview())[0].state, 'deleted');
   await assert.rejects(service.getSmartBatch(owner, batchId), /exclu/);
 });
-test('draft PDFs: objects removed before metadata, one object per chunk', async () => {
+test('configured one-file chunk preserves metadata until every object is confirmed', async () => {
+  options.deleteLimit = 1;
   await upload('one'); await upload('two'); const keys = [...objects.keys()];
   await request(); const result = await management.processBatchDeletion();
   assert.equal(result.deleted, 1); assert.equal(objects.size, 1);
   assert.equal((await db.select().from(items)).length, 2);
   await finishDeletion(); assert.equal(objects.size, 0); assert.equal(keys.length, 2);
   assert.equal((await db.select().from(items)).length, 0);
+});
+
+for (const count of [5, 20]) test(`${count} PDFs use groups of five, finalizing in the last invocation`, async () => {
+  for (let i = 0; i < count; i++) await upload(`unique ${i}`);
+  const foreignBatch = await another('other-owner');
+  await service.uploadSmartPdf('other-owner', foreignBatch, 'foreign.pdf', 'application/pdf', pdfFixture('foreign'));
+  const foreignKey = [...objects.keys()].at(-1);
+  await request();
+  assert.equal((await management.listSmartBatches(owner, {search:'',status:'',oldest:false,page:0})).rows.some(r=>r.id===batchId),false);
+  assert.equal((await management.listSmartBatches(owner, {search:'',status:'DELETING',oldest:false,page:0})).rows[0].pendingFiles,count);
+  for (let n=0;n<count/5;n++) {
+    const result=await management.processBatchDeletion();
+    assert.equal(result.deleted,5); assert.equal(result.pending,n<count/5-1);
+    assert.equal((await management.batchDeletionStatus(owner,batchId)).pendingFiles,count-(n+1)*5);
+  }
+  assert.equal(options.deleteGroups.length,count/5); assert.ok(options.deleteGroups.every(keys=>keys.length===5 && !keys.includes(foreignKey)));
+  assert.equal(objects.size,1); assert.ok(objects.has(foreignKey));
+  assert.equal((await management.batchDeletionStatus(owner,batchId)).state,'deleted');
+  assert.equal((await service.getSmartBatch('other-owner',foreignBatch)).items.length,1);
+});
+
+test('partial removal commits only confirmed keys and retries remaining objects', async () => {
+  for(let i=0;i<5;i++) await upload(`partial ${i}`);
+  await request(); options.deletePartial=2;
+  const result=await management.processBatchDeletion(); assert.equal(result.deleted,2); assert.equal(result.pending,true);
+  const rows=await db.select().from(items); assert.equal(rows.filter(r=>r.fileDeletedAt).length,2); assert.equal(objects.size,3);
+  assert.ok((await management.batchDeletionStatus(owner,batchId)).error);
+  options.deletePartial=undefined; await finishDeletion(); assert.equal(objects.size,0);
+  assert.equal(options.deleteGroups[1].length,3);
+});
+
+test('Storage wait holds no SQL transaction: create, read, upload, repeated request and another cleanup proceed', async () => {
+  await upload('delete'); const choices=await preview(); await management.requestBatchDeletion(owner,choices);
+  let release, entered;
+  const started=new Promise(resolve=>{entered=resolve;});
+  options.holdDelete=()=>{entered();return new Promise(resolve=>{release=resolve;});};
+  const cleaning=management.processBatchDeletion(); await started;
+  try {
+    await Promise.race([(async()=>{
+      const route=load('app/api/smart-sends/[[...path]]/route.ts');
+      const created=await route.POST(new Request('https://app.test/api/smart-sends',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'Novo durante limpeza'})}),{params:Promise.resolve({path:[]})});
+      assert.equal(created.status,201); const {id}=await created.json();
+      assert.equal((await service.getSmartBatch(owner,id)).items.length,0);
+      assert.equal((await management.requestBatchDeletion(owner,choices))[0].state,'pending');
+      assert.equal(await management.processBatchDeletion(),null,'active lease is skipped');
+      await service.uploadSmartPdf(owner,id,'new.pdf','application/pdf',pdfFixture('new during deletion'));
+      assert.equal((await service.getSmartBatch(owner,id)).items.length,1);
+    })(),new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('operations waited for Storage')),2000);timer.unref();})]);
+  } finally { release(); await cleaning; }
+  assert.equal(objects.size,1); assert.equal(options.deleteGroups.length,1);
+});
+
+test('interrupted finalization leaves a durable lease and safely recovers absent objects', async () => {
+  await upload(); await request();
+  const transaction=db.transaction.bind(db); let interrupted=false;
+  options.afterDelete=()=>{interrupted=true;};
+  db.transaction=(...args)=>interrupted ? Promise.reject(Error('worker interrupted before commit')) : transaction(...args);
+  try { await assert.rejects(management.processBatchDeletion(),/interrupted/); }
+  finally { db.transaction=transaction; options.afterDelete=undefined; }
+  const [batch]=await db.select().from(batches).where(eq(batches.id,batchId));
+  assert.ok(batch.lockToken.startsWith('delete:')); assert.ok(batch.lockUntil); assert.equal(objects.size,0);
+  assert.equal((await db.select().from(items))[0].fileDeletedAt,null);
+  assert.equal(await management.processBatchDeletion(),null);
+  await db.update(batches).set({lockUntil:new Date(0)}).where(eq(batches.id,batchId));
+  await finishDeletion(); assert.equal((await management.batchDeletionStatus(owner,batchId)).state,'deleted');
+});
+
+test('a late cleanup cannot finalize or clear a newer lease', async () => {
+  await upload(); await request();
+  let release, entered;
+  const started=new Promise(resolve=>{entered=resolve;});
+  options.holdDelete=()=>{entered();return new Promise(resolve=>{release=resolve;});};
+  const old=management.processBatchDeletion(); await started;
+  await db.update(batches).set({lockUntil:new Date(0)}).where(eq(batches.id,batchId));
+  options.holdDelete=undefined;
+  const newer=await management.processBatchDeletion(); assert.equal(newer.pending,false);
+  release(); assert.equal((await old).deleted,0);
+  assert.equal((await management.batchDeletionStatus(owner,batchId)).state,'deleted');
+});
+
+test('mismatched storage key or owner is never sent to Storage', async () => {
+  const row=await upload(); await request();
+  await db.update(items).set({storageKey:`smart-sends/${crypto.randomUUID()}.pdf`}).where(eq(items.id,row.id));
+  assert.equal((await management.processBatchDeletion()).deleted,0); assert.equal(options.deleteGroups,undefined);
+  await assert.rejects(db.update(items).set({storageKey:row.storageKey,ownerId:'other-owner'}).where(eq(items.id,row.id)),e=>e.cause?.code==='23503');
+  assert.equal((await management.processBatchDeletion()).deleted,0); assert.equal(objects.size,1);
+});
+
+test('deletion opportunities use scheduled event time and preserve retention slots', async () => {
+  await upload(); await request();
+  await service.cleanupSmartFiles(8*60_000); assert.equal(options.deleteGroups,undefined);
+  await service.cleanupSmartFiles(0); assert.equal(options.deleteGroups.length,1);
 });
 test('prepared and reviewed batch never started is eligible', async () => {
   await prepared(); assert.equal((await preview())[0].eligible, true);

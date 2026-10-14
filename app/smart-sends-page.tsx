@@ -104,10 +104,10 @@ export function SmartSendsPage() {
   const finished = counts.SENT + counts.FAILED + counts.SKIPPED + counts.UNCERTAIN;
   const showingImport = !!editing && importStep;
   const step = !data || showingImport ? 0 : !editing ? 4 : ready ? 3 : 1;
-  return <div className="smart-sends">{data && <Button className="smart-back" variant="ghost" disabled={busy} onClick={() => { setData(null); setUploads([]); setError(''); selectedFiles.current.clear(); }}><ArrowLeft aria-hidden="true" />Voltar aos lotes</Button>}<section className="page-intro compact"><div><p className="eyebrow">DOCUMENTOS PERSONALIZADOS</p><h1>Envios Inteligentes</h1><p>{data ? data.batch.name : 'Importe PDFs, revise os destinatários e acompanhe cada envio.'}</p></div><Button onClick={create} disabled={busy || loading}><Plus />Novo lote</Button></section>
+  return <div className="smart-sends">{data && <Button className="smart-back" variant="ghost" disabled={busy} onClick={() => { setData(null); setUploads([]); setError(''); selectedFiles.current.clear(); }}><ArrowLeft aria-hidden="true" />Voltar aos lotes</Button>}<section className="page-intro compact"><div><p className="eyebrow">DOCUMENTOS PERSONALIZADOS</p><h1>Envios Inteligentes</h1><p>{data ? data.batch.name : 'Importe PDFs, revise os destinatários e acompanhe cada envio.'}</p></div><Button onClick={create} disabled={busy}><Plus />Novo lote</Button></section>
     {data && <ol className="smart-steps" aria-label="Etapas do envio">{['Importação', 'Identificação', 'Revisão', 'Confirmação', 'Acompanhamento'].map((s, i) => <li key={s} aria-current={i === step ? 'step' : undefined} className={i === step ? 'current' : i < step ? 'done' : ''}><span>{i + 1}</span>{s}</li>)}</ol>}
     {error && <div className="smart-error" role="alert">{error}<Button variant="outline" size="sm" onClick={() => void run(async () => { if (batchId) await refresh(batchId); else { setTemplates(await api<Template[]>('/templates')); } })} disabled={busy}>Tentar novamente</Button></div>}
-    {loading ? <p role="status">Carregando Envios Inteligentes...</p> : !data && <BatchManager disabled={busy} onOpen={id => void run(() => openBatch(id))} onDeleted={ids => {
+    {loading && <p role="status">Carregando modelos de mensagem...</p>}{!data && <BatchManager disabled={busy} onOpen={id => void run(() => openBatch(id))} onDeleted={ids => {
       if (batchId && ids.includes(batchId)) { setData(null); setUploads([]); selectedFiles.current.clear(); }
     }} />}
 

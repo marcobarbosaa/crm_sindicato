@@ -90,6 +90,13 @@ test('rotation uses scheduled event time and remains stable across restart/repea
   assert.equal(loader()('lib/worker-schedule.ts').scheduledTask(schedule.MAINTENANCE_CRON,atMinute(minute)),task);
  }
 });
+
+test('smart file cleanup receives scheduled time, including a delayed delivery', async () => {
+ const times=[];const {worker}=loadWorker({cleanSmart:async time=>{times.push(time);return {deleted:0};}});
+ await worker.scheduled({...event,scheduledTime:atMinute(6)});
+ await worker.scheduled({...event,scheduledTime:atMinute(14)});
+ assert.deepEqual(times,[atMinute(6),atMinute(14)]);
+});
 test('removed triggers and malformed timestamps do not execute a fallback or send', async () => {
  const {worker,logs}=loadWorker();
  for(const cron of ['*/5 * * * *','3-59/5 * * * *','2-59/3 * * * *','unknown'])await worker.scheduled({...event,cron});

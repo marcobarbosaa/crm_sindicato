@@ -26,7 +26,7 @@ export default {
           console.info({ ...event, status: "completed", smartBatches: batch ? 1 : 0 });
         } else if (task === "smart-files") {
           const { cleanupSmartFiles } = await import("./lib/smart-send-service");
-          const cleanup = await cleanupSmartFiles();
+          const cleanup = await cleanupSmartFiles(controller.scheduledTime);
           console.info({ ...event, status: "completed", ...cleanup });
         } else if (task === "smart-delivery") {
           const { checkSmartDelivery } = await import("./lib/smart-send-delivery");
