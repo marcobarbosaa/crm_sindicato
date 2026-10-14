@@ -4,11 +4,29 @@ import { loader } from './smart-test-loader.mjs';
 const load = loader();
 const { importSnapshot, smartJson, processImportQueue } = load('lib/smart-import-client.ts');
 const { smartNumericId } = load('lib/smart-send-contract.ts');
+const { normalizeSmartApiIds } = load('lib/smart-send-contract.ts');
 const originalFetch = globalThis.fetch, originalWarn = console.warn;
 let logs;
 beforeEach(() => { logs = []; console.warn = (...args) => logs.push(args); });
 afterEach(() => { globalThis.fetch = originalFetch; console.warn = originalWarn; });
 const item = () => ({ documentId: crypto.randomUUID(), contentHash: 'a'.repeat(64), persistence: 'persisted', storage: 'stored', analysis: 'complete', code: null, message: 'PDF salvo.', recoverable: false });
+
+test('normalização rápida rejeita IDs inválidos em todos os campos e não altera a entrada', () => {
+  const fixture = () => ({batch:{id:'1',templateId:'2',accountId:'3'},items:[{companyId:'4',batchId:'1',messageId:'5',candidates:['4'],suggestions:[{id:'4'}],body:'001',readable:true}]});
+  const original = fixture(), saved = structuredClone(original);
+  const normalized = normalizeSmartApiIds('1',original);
+  assert.deepEqual(original,saved); assert.equal(normalized.items[0].body,'001'); assert.equal(normalized.items[0].readable,true);
+  const setters = [
+    (v,x)=>v.batch.id=x, (v,x)=>v.batch.templateId=x, (v,x)=>v.batch.accountId=x,
+    (v,x)=>v.items[0].companyId=x, (v,x)=>v.items[0].batchId=x, (v,x)=>v.items[0].messageId=x,
+    (v,x)=>v.items[0].candidates=[x], (v,x)=>v.items[0].suggestions=[{id:x}],
+  ];
+  for (const set of setters) for (const invalid of [true,false,0,-1,1.5,'',' ',' 1','1e2','0x1',{},[],NaN,Infinity,Number.MAX_SAFE_INTEGER+1]) {
+    const value=fixture(); set(value,invalid); assert.throws(()=>normalizeSmartApiIds('1',value));
+  }
+  for (const malformed of [null,[],{}, {batch:{id:1},items:[null]}, {batch:{id:1},items:[{companyId:null,candidates:null}]},
+    {batch:{id:1},items:[{companyId:null,candidates:[],suggestions:null}]}, {batch:{id:1},items:[{companyId:null,candidates:[],batchId:null}]}]) assert.throws(()=>normalizeSmartApiIds('1',malformed));
+});
 test('ID do detalhe recebido como string aceita snapshot numérico de lote vazio', async () => {
   const original = globalThis.fetch;
   try {

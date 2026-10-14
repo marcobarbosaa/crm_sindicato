@@ -8,15 +8,24 @@ export async function readPdfText(bytes: Uint8Array, limits: SmartLimits = SMART
   try {
     pdf = await getDocumentProxy(new Uint8Array(bytes), { useSystemFonts: false, stopAtErrors: true, verbosity: 0 });
     if (pdf.numPages > limits.pages) return { text: '', error: 'PDF_PAGE_LIMIT', readable: false };
-    let text = '';
+    const pages: string[] = []; let length = 0;
     for (let n = 1; n <= pdf.numPages; n++) {
-      const page = await pdf.getPage(n), content = await page.getTextContent();
-      text += content.items.map(item => 'str' in item ? item.str : '').join(' ') + '\n';
-      page.cleanup();
-      if (text.length > limits.textChars) return { text: '', error: 'PDF_TEXT_LIMIT', readable: false };
+      const page = await pdf.getPage(n);
+      try {
+        const content = await page.getTextContent();
+        // Bound the join before allocating a potentially oversized page string.
+        for (let i = 0; i < content.items.length; i++) {
+          const item = content.items[i];
+          length += ('str' in item ? item.str.length : 0) + (i ? 1 : 0);
+          if (length > limits.textChars) return { text: '', error: 'PDF_TEXT_LIMIT', readable: false };
+        }
+        if (++length > limits.textChars) return { text: '', error: 'PDF_TEXT_LIMIT', readable: false };
+        pages.push(content.items.map(item => 'str' in item ? item.str : '').join(' '));
+      } finally { page.cleanup(); }
     }
+    const text = pages.join('\n') + (pages.length ? '\n' : '');
     return { text, readable: true, error: text.trim() ? null : 'PDF_NO_TEXT' };
   } catch (error) {
     return { text: '', readable: false, error: error instanceof Error && error.name === 'PasswordException' ? 'PDF_PASSWORD' : 'PDF_CORRUPT' };
-  } finally { await pdf?.loadingTask.destroy(); }
+  } finally { await pdf?.loadingTask.destroy().catch(() => {}); }
 }

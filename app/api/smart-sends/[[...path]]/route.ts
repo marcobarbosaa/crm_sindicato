@@ -10,7 +10,8 @@ import { storageConfig } from '@/lib/attachment-storage';
 import { AttachmentError } from '@/lib/attachments';
 import { normalizeSmartApiIds, smartNumericId } from '@/lib/smart-send-contract';
 import { batchDeletionStatus, listSmartBatches, previewBatchDeletion, requestBatchDeletion } from '@/lib/smart-batch-management';
-import { controlSmartBatch, getSmartBatch, getSmartImportStatus, ownedItems, prepareSmartBatch, reviewSmartItem, smartCatalog, uploadSmartPdf } from '@/lib/smart-send-service';
+import { getSmartBatch, getSmartImportStatus, smartCatalog } from '@/lib/smart-send-queries';
+import { ownedItems } from '@/lib/smart-send-scope';
 type Context = { params: Promise<{ path?: string[] }> };
 const idSchema = smartNumericId;
 async function json(request: Request) { return JSON.parse(new TextDecoder().decode(await boundedBytes(request.body, 64 * 1024))) as unknown; }
@@ -58,6 +59,7 @@ async function handle(request: NextRequest, context: Context) {
         return new Response('\uFEFF' + rows.map(r => r.map(csvCell).join(';')).join('\r\n'), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="envios-${id}.csv"`, 'cache-control': 'private, no-store' } });
       }
       if (method === 'POST' && path.length === 2 && path[1] === 'upload') {
+        const { uploadSmartPdf } = await import('@/lib/smart-send-service');
         const limit = smartLimits(storageConfig).fileBytes;
         if (Number(request.headers.get('content-length')) > limit) throw new SmartSendError('PDF excede o limite.', 413);
         const name = decodeURIComponent(request.headers.get('x-file-name') || '');
@@ -77,6 +79,7 @@ async function handle(request: NextRequest, context: Context) {
             'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "sandbox; default-src 'none'; frame-ancestors 'self'" } });
         }
         if (method === 'PATCH' && path.length === 3) {
+          const { reviewSmartItem } = await import('@/lib/smart-send-service');
           const input = z.object({ companyId: z.number().int().positive().optional(), confirm: z.boolean().optional(), excluded: z.boolean().optional(), remove: z.boolean().optional() }).strict().parse(await json(request));
           await reviewSmartItem(owner, id, itemId, input); return response({ ok: true });
         }
@@ -91,10 +94,12 @@ async function handle(request: NextRequest, context: Context) {
         }
       }
       if (method === 'POST' && path.length === 2 && path[1] === 'prepare') {
+        const { prepareSmartBatch } = await import('@/lib/smart-send-service');
         const input = z.object({ templateId: z.number().int().positive(), includeCommon: z.boolean() }).strict().parse(await json(request));
         await prepareSmartBatch(owner, id, input.templateId, input.includeCommon); return response(await getSmartBatch(owner, id));
       }
       if (method === 'POST' && path.length === 2 && path[1] === 'control') {
+        const { controlSmartBatch } = await import('@/lib/smart-send-service');
         const input = z.object({ action: z.enum(['start', 'pause', 'resume', 'cancel']), revision: z.number().int().optional(), confirmed: z.boolean().optional() }).strict().parse(await json(request));
         await controlSmartBatch(owner, id, input.action, input.revision, input.confirmed); return response(await getSmartBatch(owner, id));
       }

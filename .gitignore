@@ -56,3 +56,4 @@ next-env.d.ts
 !/docs/smart-sends.md
 !/docs/cloudflare-cron-deploy.md
 !/docs/smart-batch-deletion.md
+!/docs/smart-sends-cpu-audit.md

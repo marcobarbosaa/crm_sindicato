@@ -52,6 +52,41 @@ beforeEach(async () => {
 });
 after(async () => { globalThis.fetch = realFetch; await engine.close(); });
 const owner = 'local-preview-user';
+for (const count of [0, 30, 100]) test(`GET real com ${count} itens preserva revisão e consulta durante importação`, async () => {
+  const now = new Date();
+  if (count) await db.insert(items).values(Array.from({ length: count }, (_, n) => ({
+    id: crypto.randomUUID(), ownerId: owner, batchId, fileName: `fixture-${n}.pdf`, fileSize: 100,
+    contentHash: String(n).padStart(64, '0'), storageKey: `private-${n}`, rfcMessageId: `<fixture-${n}@test>`,
+    companyId, candidates: [companyId], extractedCnpjs: ['11222333000181'], recipient: 'synthetic@example.test',
+    fileReady: true, readable: n !== 0, reviewStatus: n === 0 ? 'UPLOADING' : 'READY',
+    confirmedAt: n === 0 ? null : now, importActiveAt: n === 0 ? now : null,
+    subject: 'Assunto de revisão', body: 'Corpo de revisão', deliveryPageToken: 'private-cursor',
+    deliveryLockToken: 'private-lock', createdAt: now, updatedAt: now,
+  })));
+  // Fail if a read route even loads mutation/PDF modules.
+  const readLoad = loader({ '@/db': { getDb: () => db, withCampaignDb: fn => fn() }, '@/db/schema': schema,
+    'cloudflare:workers': { env: {} },
+    '@/lib/smart-send-auth': { smartOwner: async () => owner },
+    '@/lib/smart-send-service': new Proxy({}, { get() { assert.fail('GET loaded mutation service'); } }),
+    unpdf: new Proxy({}, { get() { assert.fail('GET loaded PDF parser'); } }),
+    'next/server': { NextResponse: { json: (v, init) => Response.json(v, init) } },
+  });
+  const route = readLoad('app/api/smart-sends/[[...path]]/route.ts');
+  const response = await route.GET(new Request(`https://app.test/api/smart-sends/${batchId}`), { params: Promise.resolve({ path: [String(batchId)] }) });
+  assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  const detail = await response.json();
+  assert.equal(detail.items.length, count); assert.equal(detail.summary.documents, count);
+  assert.equal(detail.summary.eligible, Math.max(0, count - 1)); assert.equal(detail.summary.blocked, count ? 1 : 0);
+  for (const item of detail.items) {
+    assert.equal(item.subject, 'Assunto de revisão'); assert.equal(item.body, 'Corpo de revisão');
+    assert.equal(item.suggestions.length, 1); assert.equal(item.suggestions[0].id, companyId);
+    for (const field of ['storageKey', 'deliveryPageToken', 'deliveryLockToken', 'ownerId']) assert.equal(field in item, false);
+  }
+  const status = await route.GET(new Request(`https://app.test/api/smart-sends/${batchId}/import-status`), { params: Promise.resolve({ path: [String(batchId), 'import-status'] }) });
+  const progress = await status.json(); assert.equal(status.status, 200); assert.equal(progress.items.length, count);
+  if (count) assert.equal(progress.items.filter(item => item.analysis === 'pending').length, 1);
+  assert.equal(sends.length, 0);
+});
 async function upload(text = 'Destinataria 11222333000181', name = 'alfa.pdf') {
   await service.uploadSmartPdf(owner, batchId, name, 'application/pdf', pdfFixture(text));
   return (await db.select().from(items)).at(-1);
@@ -165,13 +200,13 @@ test('PDF corrompido está salvo mas não é apresentado como análise bem-suced
   assert.equal(result.storage, 'stored'); assert.equal(result.analysis, 'failed'); assert.equal(result.code, 'PDF_CORRUPT'); assert.equal(result.recoverable, false);
 });
 
-test('100 PDFs sintéticos persistem sem truncar nem serializar bigint nativo', async () => {
-  for (let n = 0; n < 100; n++) {
+for (const count of [26, 100]) test(`${count} PDFs sintéticos persistem sem truncar nem serializar bigint nativo`, async () => {
+  for (let n = 0; n < count; n++) {
     const result = await service.uploadSmartPdf(owner, batchId, `doc-${n}.pdf`, 'application/pdf', pdfFixture(`Destinataria 11222333000181 ${n}`), crypto.randomUUID());
     assert.equal(result.persistence, 'persisted'); assert.equal(result.analysis, 'complete');
   }
   const progress = await service.getSmartImportStatus(owner, batchId), detail = await service.getSmartBatch(owner, batchId);
-  assert.equal(progress.items.length, 100); assert.equal(detail.items.length, 100);
+  assert.equal(progress.items.length, count); assert.equal(detail.items.length, count);
   assert.ok(JSON.stringify(progress).length < JSON.stringify(detail).length / 2);
   assert.equal(sends.length, 0);
 });

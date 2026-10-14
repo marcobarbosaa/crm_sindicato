@@ -21,8 +21,7 @@ export function extractCnpjs(text: string) {
   return [...found.values()];
 }
 export const normalizeName = (name: string) => name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\.pdf$/i, '').replace(/[^a-z0-9]+/g, ' ').trim();
-export function matchPdfCompany(text: string, filename: string, companies: MatchCompany[]) {
-  const cnpjs = extractCnpjs(text);
+export function matchPdfCompany(text: string, filename: string, companies: MatchCompany[], cnpjs = extractCnpjs(text)) {
   if (cnpjs.length) {
     const candidates = companies.filter(c => cnpjs.some(n => n.cnpj === c.cnpj?.replace(/\D/g, '')));
     // Context ranks suggestions only. Multiple tax IDs always require human review.

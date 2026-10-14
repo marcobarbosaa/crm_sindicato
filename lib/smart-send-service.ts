@@ -7,13 +7,14 @@ import { validateAttachmentSet } from './attachments';
 import { SmartSendError, smartLimits, validateSmartFile, recipientReview, personalizeSmart } from './smart-send-policy';
 import { contentHash, smartStorage } from './smart-send-storage';
 import { extractCnpjs, matchPdfCompany, normalizeName } from './pdf-company-matcher';
-import { readPdfText } from './pdf-text';
 import { GMAIL_SEND_SCOPE } from './gmail';
 import { importResult, IMPORT_LEASE_MS } from './smart-import-protocol';
-import { parseSmartContract, smartNumericId } from './smart-send-contract';
+import { ownedBatch, ownedItems } from './smart-send-scope';
 import { lockBatchImports, processBatchDeletion } from './smart-batch-management';
-export const ownedBatch = (owner: string, id: number) => and(eq(batches.ownerId, owner), eq(batches.id, id));
-export const ownedItems = (owner: string, id: number) => and(eq(items.ownerId, owner), eq(items.batchId, id));
+
+export { ownedBatch, ownedItems } from './smart-send-scope';
+export { getSmartBatch, getSmartImportStatus, smartCatalog } from './smart-send-queries';
+
 export async function requireBatch(owner: string, id: number, tx: Transaction) {
   const [batch] = await tx.select().from(batches).where(ownedBatch(owner, id)).for('update');
   if (!batch) throw new SmartSendError('Lote não encontrado.', 404);
@@ -25,42 +26,6 @@ function editable(batch: typeof batches.$inferSelect) {
 }
 async function invalidate(tx: Transaction, owner: string, id: number) {
   await tx.update(batches).set({ status: 'DRAFT', revision: sql`${batches.revision} + 1`, updatedAt: new Date(), commonAttachments: [] }).where(ownedBatch(owner, id));
-}
-export async function getSmartBatch(owner: string, id: number) {
-  const db = getDb();
-  const [batch] = await db.select().from(batches).where(ownedBatch(owner, id));
-  if (!batch) throw new SmartSendError('Lote não encontrado.', 404);
-  if (batch.deletionRequestedAt) throw new SmartSendError('Lote em exclusão ou já excluído.', 409);
-  const rows = await db.select().from(items).where(and(ownedItems(owner, id), isNull(items.removedAt))).orderBy(asc(items.createdAt));
-  const [settings] = await db.select().from(crmSettings).where(eq(crmSettings.ownerId, owner));
-  const [account] = await db.select({ email: emailAccounts.email }).from(emailAccounts).where(and(eq(emailAccounts.ownerId, owner), eq(emailAccounts.provider, 'GMAIL')));
-  const eligible = rows.filter(row => !row.excluded && row.reviewStatus === 'READY' && row.confirmedAt && row.fileReady && !row.fileDeletedAt);
-  const candidateIds = [...new Set(rows.flatMap(row => row.candidates))];
-  const suggestions = candidateIds.length ? await db.select({ id: companies.id, name: companies.name, primaryEmail: companies.primaryEmail }).from(companies).where(and(eq(companies.ownerId, owner), inArray(companies.id, candidateIds))) : [];
-  return { batch: { ...batch, id: parseSmartContract(smartNumericId, batch.id, 'batch-detail-id'), lockToken: undefined }, items: rows.map(row => ({ ...row, storageKey: undefined, deliveryLockToken: undefined, suggestions: suggestions.filter(c => row.candidates.includes(Number(c.id))) })),
-    summary: { documents: rows.length, companies: new Set(eligible.map(i => i.companyId)).size, eligible: eligible.length,
-      blocked: rows.filter(i => !i.excluded && !eligible.includes(i)).length, duplicates: rows.filter(i => i.duplicateOf).length,
-      withoutEmail: rows.filter(i => !i.recipient).length, excluded: rows.filter(i => i.excluded).length },
-    limits: smartLimits(storageConfig), dailyLimit: settings?.dailySendLimit || 100, sender: account?.email || null };
-}
-export async function smartCatalog(owner: string, search?: string) {
-  const db = getDb();
-  if (search !== undefined) return db.select({ id: companies.id, name: companies.name, cnpj: companies.cnpj, primaryEmail: companies.primaryEmail, primaryEmailStatus: companies.primaryEmailStatus }).from(companies)
-    .where(and(eq(companies.ownerId, owner), or(ilike(companies.name, `%${search.slice(0, 100)}%`), ilike(companies.tradeName, `%${search.slice(0, 100)}%`), ilike(companies.cnpj, `%${search.slice(0, 100)}%`)))).limit(30);
-  const templates = await db.select().from(emailTemplates).where(eq(emailTemplates.ownerId, owner)).limit(100);
-  const attachments = await db.select().from(templateAttachments).where(and(eq(templateAttachments.ownerId, owner), eq(templateAttachments.ready, true)));
-  return templates.map(t => ({ ...t, attachments: attachments.filter(a => a.templateId === t.id).map(attachmentMetadata) }));
-}
-export async function getSmartImportStatus(owner: string, batchId: number) {
-  const db = getDb();
-  const [batch] = await db.select({ id: batches.id, deletionRequestedAt: batches.deletionRequestedAt }).from(batches).where(ownedBatch(owner, batchId));
-  if (!batch) throw new SmartSendError('Lote não encontrado.', 404);
-  if (batch.deletionRequestedAt) throw new SmartSendError('Lote em exclusão ou já excluído.', 409);
-  // No rendered emails, recipients, suggestions, storage keys or delivery metadata.
-  const rows = await db.select({ id: items.id, contentHash: items.contentHash, fileReady: items.fileReady,
-    fileDeletedAt: items.fileDeletedAt, removedAt: items.removedAt, duplicateOf: items.duplicateOf,
-    reviewStatus: items.reviewStatus, error: items.error }).from(items).where(ownedItems(owner, batchId));
-  return { batchId: parseSmartContract(smartNumericId, batch.id, 'import-status-id'), items: rows.map(importResult) };
 }
 export async function uploadSmartPdf(owner: string, batchId: number, name: string, mime: string, bytes: Uint8Array, uploadId?: string, recover = false) {
   const limits = smartLimits(storageConfig); validateSmartFile({ name, type: mime, size: bytes.length }, limits);
@@ -109,13 +74,14 @@ export async function uploadSmartPdf(owner: string, batchId: number, name: strin
     stored = true;
     const persisted = await db.update(items).set({ fileReady: true }).where(lease).returning({ id: items.id });
     if (!persisted.length) throw new SmartSendError('A importação está sendo recuperada por outra requisição.', 409);
-    const reading = await readPdfText(bytes, limits), cnpjs = extractCnpjs(reading.text).map(c => c.cnpj);
+    const { readPdfText } = await import('./pdf-text');
+    const reading = await readPdfText(bytes, limits), extracted = extractCnpjs(reading.text), cnpjs = extracted.map(c => c.cnpj);
     // Bounded owner-scoped lookup. Filename suggestions never imply approval.
     const words = normalizeName(name).split(' ').filter(w => w.length > 2).slice(0, 8);
     const candidates = await db.select().from(companies).where(and(eq(companies.ownerId, owner), cnpjs.length
       ? inArray(sql<string>`regexp_replace(${companies.cnpj}, '[^0-9]', '', 'g')`, cnpjs)
       : words.length ? or(...words.map(word => or(ilike(companies.name, `%${word}%`), ilike(companies.tradeName, `%${word}%`)))) : sql`false`)).limit(200);
-    const match = matchPdfCompany(reading.text, name, candidates), company = candidates.find(c => c.id === match.companyId);
+    const match = matchPdfCompany(reading.text, name, candidates, extracted), company = candidates.find(c => c.id === match.companyId);
     await db.transaction(async tx => {
       const batch = await requireBatch(owner, batchId, tx); editable(batch);
       const changed = await tx.update(items).set({ fileReady: true, readable: reading.readable, extractedCnpjs: match.cnpjs, candidates: match.candidates,
