@@ -40,7 +40,7 @@ async function mock({ requestId, request }) {
     const item = { id: header('x-upload-id'), fileName, fileSize: 2100, fileReady: true, fileDeletedAt: null, readable: true,
       companyId: first ? 1 : null, companyName: first ? 'Empresa Alfa' : null, recipient: first ? 'alfa@example.test' : null, companyCnpj: null,
       extractedCnpjs: first ? ['11222333000181'] : [], candidates: first ? [1] : [2], suggestions: first ? [] : [{ id: 2, name: 'Empresa Beta', primaryEmail: 'beta@example.test' }], identificationMethod: first ? 'CNPJ' : 'FILENAME',
-      reviewStatus: first ? 'IDENTIFIED' : 'REVIEW_REQUIRED', sendStatus: 'DRAFT', deliveryStatus: 'PENDING', excluded: false, error: null };
+      reviewStatus: first ? 'IDENTIFIED' : 'REVIEW_REQUIRED', confirmedAt: null, sendStatus: 'DRAFT', deliveryStatus: 'PENDING', excluded: false, error: null };
     body = { ok: true, documentId: header('x-upload-id'), contentHash: createHash('sha256').update('%PDF-synthetic-' + fileName).digest('hex'), persistence: 'persisted', storage: 'stored', analysis: 'complete', code: null, message: 'PDF salvo e analisado.', recoverable: false };
     if (scenario === 'mixed' && fileName === 'volume-1.pdf' && !header('x-recover-upload')) {
       Object.assign(body, { analysis: 'pending', recoverable: true, code: 'IMPORT_ANALYSIS_FAILED', message: 'PDF salvo. Análise pendente de recuperação.' });
@@ -60,7 +60,7 @@ async function mock({ requestId, request }) {
   } else if (path.includes('/items/') && request.method === 'PATCH') {
     const item = data.items.find(i => path.endsWith(i.id)), input = JSON.parse(request.postData);
     if (input.companyId) Object.assign(item, { companyId: 2, companyName: 'Empresa Beta', recipient: 'beta@example.test', reviewStatus: 'IDENTIFIED', identificationMethod: 'MANUAL' });
-    if (input.confirm) item.reviewStatus = 'READY';
+    if (input.confirm) { item.reviewStatus = 'READY'; item.confirmedAt = new Date().toISOString(); }
     data.batch.revision++; data.batch.status = 'DRAFT'; body = { ok: true };
   } else if (path.endsWith('/prepare')) {
     const input = JSON.parse(request.postData); data.batch.status = 'READY'; data.batch.templateName = template.name; data.batch.revision++;
@@ -95,11 +95,27 @@ try {
   checks.push('import isolated from identification and message, desktop/mobile screenshots, correct active step');
   assert.equal(requests.filter(r => r.path.endsWith('/control')).length, 0); checks.push('multiple upload, progress and no automatic sending');
   await click('Continuar para identificação');
+  await waitFor("document.querySelectorAll('.smart-identification-document').length===2");
+  assert.equal(await evaluate("!!document.querySelector('.smart-sends table') || document.querySelector('.smart-sends').textContent.includes('Mensagem e confirmação')"), false);
+  assert.equal(await evaluate("document.querySelector('.smart-steps [aria-current=step]').textContent"), '2Identificação');
+  assert.equal(await evaluate("document.querySelector('.smart-identification').textContent.includes('Identificado automaticamente') && document.querySelector('.smart-identification').textContent.includes('Aguardando confirmação')"), true);
+  await screenshot('desktop-identification');
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }); await screenshot('mobile-identification');
+  assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await click('Revisar destinatários');
   await waitFor("document.querySelectorAll('.smart-sends tbody tr').length===2");
-  await click('Confirmar associação'); await waitFor("document.querySelector('.smart-sends tbody tr').textContent.includes('Pronto para envio')");
+  await click('Confirmar associação'); await waitFor("document.querySelector('.smart-sends tbody tr').textContent.includes('Confirmado')");
   await evaluate("document.querySelectorAll('.smart-associate')[1].open=true"); await click('Empresa Betabeta@example.test');
   await waitFor("document.querySelectorAll('.smart-sends tbody tr')[1].textContent.includes('beta@example.test')"); await click('Confirmar associação');
   await waitFor("document.querySelectorAll('.smart-status.ok').length===2"); await screenshot('desktop-review'); checks.push('manual association and individual confirmation');
+  const beforeNavigation = structuredClone(data), requestsBeforeNavigation = requests.filter(r => r.path.startsWith('/api/smart-sends')).length;
+  await click('Voltar à identificação');
+  assert.equal(await evaluate("document.querySelectorAll('.smart-identification .smart-status.ok').length"), 2);
+  await click('Voltar à importação'); await click('Continuar para identificação'); await click('Revisar destinatários');
+  assert.deepEqual(data, beforeNavigation);
+  assert.equal(requests.filter(r => r.path.startsWith('/api/smart-sends')).length, requestsBeforeNavigation);
+  checks.push('navigation uses persisted results, no requests, no mutations, confirmed associations preserved');
   await evaluate("(()=>{const s=[...document.querySelectorAll('.smart-sends select')].find(s=>s.textContent.includes('Selecione um template'));s.value='1';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
   await click('Gerar revisão final'); await waitFor("!!document.querySelector('.smart-final')");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Confirmar e iniciar')).disabled"), true);
@@ -127,6 +143,15 @@ try {
       await screenshot('mobile-import-100');
       await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }); await screenshot('desktop-import-100');
       checks.push('100 documents use 25 visible rows, counts cover all pages, navigation reaches document 26');
+      await click('Continuar para identificação');
+      assert.equal(await evaluate("document.querySelectorAll('.smart-identification-document').length"), 25);
+      assert.equal(await evaluate("document.querySelector('[data-identification-count=\"Documentos analisados\"] strong').textContent"), '100');
+      await click('Próxima');
+      assert.equal(await evaluate("document.querySelector('.smart-identification-document h4').textContent"), 'volume-26.pdf');
+      await screenshot('desktop-identification-100');
+      await click('Revisar destinatários');
+      assert.equal(await evaluate("document.querySelectorAll('.smart-sends tbody tr').length"), 25);
+      checks.push('identification and review render at most 25 documents with full-batch counts');
     }
     checks.push(`${count} PDFs in browser, confirmed individually`);
   }

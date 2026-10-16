@@ -50,7 +50,7 @@ export async function getSmartBatch(owner: string, id: number) {
     if (row.excluded) summary.excluded++;
   }
   summary.companies = companyIds.size;
-  const suggestions = candidateIds.size ? await db.select({ id: companies.id, name: companies.name, primaryEmail: companies.primaryEmail }).from(companies)
+  const suggestions = candidateIds.size ? await db.select({ id: companies.id, name: companies.name, cnpj: companies.cnpj, primaryEmail: companies.primaryEmail }).from(companies)
     .where(and(eq(companies.ownerId, owner), inArray(companies.id, [...candidateIds]))) : [];
   const byId = new Map(suggestions.map(company => [Number(company.id), company]));
   return { batch: { ...batch, id: parseSmartContract(smartNumericId, batch.id, 'batch-detail-id') }, items: rows.map(row => ({ ...row, suggestions: [...new Set(row.candidates)].flatMap(id => {

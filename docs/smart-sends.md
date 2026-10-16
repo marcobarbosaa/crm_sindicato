@@ -12,7 +12,7 @@ Todas as associações exigem confirmação por documento. O destinatário é o 
 
 ## Importação — interface da etapa 2
 
-Ao criar ou abrir um lote editável, a importação tem uma tela própria. Ela mostra nome do lote, etapa atual, navegação para os lotes, seleção múltipla/drag and drop e limites de documentos, bytes e páginas retornados pelo backend. Identificação e configuração da mensagem aparecem depois de **Continuar para identificação**. É possível voltar à importação e adicionar mais PDFs.
+Ao criar ou abrir um lote editável, a importação tem uma tela própria. Ela mostra nome do lote, etapa atual, navegação para os lotes, seleção múltipla/drag and drop e limites de documentos, bytes e páginas retornados pelo backend. Os resultados aparecem depois de **Continuar para identificação**; associação e configuração da mensagem ficam na **Revisão**. É possível voltar à importação e adicionar mais PDFs.
 
 Os contadores acompanham a fila real e os documentos já existentes no lote. **100% transmitido** indica o término da transmissão; a linha continua em análise até a confirmação do servidor. Falhas de leitura, duplicatas e resultados incertos não contam como concluídos. A lista mostra 25 arquivos por página, com filtro de falhas e área de rolagem acessível por teclado; os totais incluem todas as páginas.
 
@@ -20,9 +20,21 @@ Os contadores acompanham a fila real e os documentos já existentes no lote. **1
 - **Tentar novamente falhas recuperáveis** usa a recuperação da etapa 1, consultando os registros existentes antes de qualquer tentativa. Adicionar arquivos ou continuar a fila não reenvia automaticamente um resultado incerto.
 - A remoção da fila fica disponível para arquivos ainda não enviados, com a fila parada. Não remove registros já persistidos.
 - Após recarregar ou reabrir o lote, os arquivos pendentes precisam ser selecionados novamente; o navegador conserva apenas os metadados da fila. Um lote sem metadados locais ainda mostra seus documentos salvos.
-- Para avançar com parte dos arquivos, a tela lista os que ficarão pendentes e exige ciência do usuário. O botão depende de pelo menos um documento disponível para identificação. Essa ação não inicia e-mails nem altera as regras de revisão/envio.
+- Para avançar com parte dos arquivos, a tela lista os que ficarão pendentes e exige ciência do usuário. O botão depende de pelo menos um documento persistido, permitindo consultar também lotes contendo apenas problemas de leitura. Essa ação não inicia e-mails nem altera as regras de revisão/envio.
 
 Implementação em `components/smart-sends/{import-step,upload-dropzone,upload-progress,upload-file-list}.tsx`, com derivação dos estados em `import-state.ts`. Evidências e comandos desta etapa estão na auditoria.
+
+## Identificação — interface da etapa 3
+
+Importação, Identificação e Revisão são telas distintas, selecionadas por estado local. Consultar uma etapa não faz requisições, não reprocessa PDFs e não altera status, revisão ou confirmações do lote. Lotes encerrados permitem consultar a importação sem adicionar arquivos. Alterações locais no template invalidam apenas a disponibilidade da prévia na interface; o status persistido continua vindo do servidor.
+
+A Identificação mostra os totais do lote e quatro grupos filtráveis: **Identificação única**, **Revisão necessária**, **Não identificado** e **Documento com problema**. Cada documento apresenta CNPJs extraídos, empresa/razão social, CNPJ e e-mail principal, método e motivo. Candidatas incluem o CNPJ na mesma consulta existente, restrita ao proprietário. Múltiplos CNPJs sempre pedem revisão, inclusive quando somente um está cadastrado. Sem CNPJ, nome de arquivo semelhante é apenas sugestão; texto ausente e corrupção têm motivos próprios.
+
+O reconhecimento automático aparece separado da aprovação: **Aguardando confirmação**, **Confirmado**, **Requer correção** ou **Bloqueado**. Confirmado exige `READY` e `confirmedAt`. As categorias são derivadas exclusivamente para exibição, sem migração ou alteração do contrato de persistência. Na Revisão continuam disponíveis associação manual, confirmação individual e exclusão. Nenhuma categoria visual autoriza envio.
+
+Identificação e Revisão renderizam 25 documentos por página; candidatas são expandidas sob demanda, em páginas de dez. Os contadores consideram todo o lote, contando cada empresa uma vez e preservando documentos distintos da mesma empresa. Os limites existentes do backend continuam restringindo o lote a no máximo 500 PDFs e as candidatas consultadas durante o upload; a fase não adiciona consultas por documento nem downloads de PDFs.
+
+Implementação: `components/smart-sends/identification-{state.ts,step.tsx}` e `app/smart-sends-page.tsx`. Regressões: `node --test scripts/test-smart-identification.mjs`, suíte `scripts/test-smart-*.mjs` e navegador `node scripts/test-smart-ui.mjs` com APIs simuladas. As evidências visuais ficam em `outputs/smart-qa`. TypeScript exclui `outputs`, assim como o lint, para não compilar cópias de código geradas pelas auditorias.
 
 ## Implantação manual
 

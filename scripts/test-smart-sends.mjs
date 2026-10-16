@@ -80,6 +80,7 @@ for (const count of [0, 30, 100]) test(`GET real com ${count} itens preserva rev
   for (const item of detail.items) {
     assert.equal(item.subject, 'Assunto de revisão'); assert.equal(item.body, 'Corpo de revisão');
     assert.equal(item.suggestions.length, 1); assert.equal(item.suggestions[0].id, companyId);
+    assert.equal(item.suggestions[0].cnpj, '11222333000181');
     for (const field of ['storageKey', 'deliveryPageToken', 'deliveryLockToken', 'ownerId']) assert.equal(field in item, false);
   }
   const status = await route.GET(new Request(`https://app.test/api/smart-sends/${batchId}/import-status`), { params: Promise.resolve({ path: [String(batchId), 'import-status'] }) });
@@ -97,6 +98,21 @@ async function prepared(count = 1) {
   return (await service.getSmartBatch(owner, batchId)).batch;
 }
 async function start(count = 1) { const batch = await prepared(count); await service.controlSmartBatch(owner, batchId, 'start', batch.revision, true); }
+
+test('consulta de identificação preserva confirmações e não expõe candidatas de outro proprietário', async () => {
+  await prepared();
+  const [foreign] = await db.insert(companies).values({ ownerId: 'intruder', name: 'Privada', cnpj: '11444777000161', primaryEmail: 'private@example.test', createdAt: new Date(), updatedAt: new Date() }).returning();
+  await db.update(items).set({ candidates: [companyId, Number(foreign.id)] });
+  const beforeItems = await db.select().from(items), beforeBatches = await db.select().from(batches);
+  const detail = await service.getSmartBatch(owner, batchId);
+  assert.equal(detail.items[0].suggestions.length, 1);
+  assert.equal(detail.items[0].suggestions[0].id, companyId);
+  assert.equal(detail.items[0].suggestions[0].cnpj, '11222333000181');
+  assert.equal(detail.items[0].reviewStatus, 'READY'); assert.ok(detail.items[0].confirmedAt);
+  assert.deepEqual(await db.select().from(items), beforeItems);
+  assert.deepEqual(await db.select().from(batches), beforeBatches);
+  assert.equal(sends.length, 0);
+});
 async function due() { await db.update(batches).set({ nextRunAt: new Date(0) }).where(eq(batches.id, batchId)); }
 test('migração, upload, confirmação e associação garantem somente o PDF aprovado e assinatura', async () => {
   await start(); assert.equal(sends.length, 0);
