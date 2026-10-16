@@ -1,4 +1,106 @@
-# Auditoria prévia — Envios Inteligentes
+# Auditoria — Envios Inteligentes
+
+## Etapa 5 — auditoria final do redesign (16/10/2026)
+
+### Resultado e comparação do fluxo
+
+O módulo agora apresenta cinco fases explícitas, com navegação local independente dos estados persistidos. A etapa 5 conclui Confirmação e Acompanhamento sobre os serviços existentes. Nenhum código de campanhas, Gmail OAuth, crons, processadores, política de quota ou proteção contra reenvio foi alterado nesta etapa. Não houve envio real, deploy, alteração de banco remoto ou de configuração Cloudflare.
+
+| Fase | Fluxo anterior ao redesign | Fluxo atual |
+| --- | --- | --- |
+| Importação | Upload, análise e revisão próximos na mesma tela | Fila própria, progresso por arquivo, pausa, recuperação e confirmação da persistência |
+| Identificação | Resultado técnico misturado à associação | Quatro grupos, CNPJs, candidatas, motivos e reconhecimento separado da aprovação |
+| Revisão | Tabela horizontal | Lista e detalhe com PDF sob demanda, filtros, seleção manual e confirmação individual |
+| Confirmação | Configuração e prévia dentro da revisão | Tela própria com mensagem, assinatura, anexos, quota, destinatários e autorização explícita |
+| Acompanhamento | Tabela de resultados e controles | Indicadores globais, pesquisa, filtros, horários registrados e controles compatíveis com o servidor |
+
+Nas cinco fases, listas de documentos renderizam até 25 itens por página; os totais continuam considerando o lote inteiro. O teste de 100 documentos aprovados para uma empresa confirma 100 mensagens, uma por PDF, com acesso à última associação/prévia. A navegação não altera associações confirmadas nem reprocessa PDFs. A revisão em lote de associações não foi implementada; permanece a aprovação por documento.
+
+### Segurança e rastreabilidade verificadas
+
+- Proprietário, CNPJ, destinatário, integridade e confirmação individual continuam validados pelos serviços existentes. Reconhecimento ou seleção aproximada não autorizam envio.
+- Preparação congela assunto/corpo/assinatura e anexos; mudar configuração local exige nova preparação. A autorização envia a revisão corrente, é registrada no servidor e não envia e-mails na própria requisição.
+- Revisão desatualizada é recusada. Falha de comunicação não marca sucesso: a interface bloqueia ações dependentes até reconciliar. Resposta perdida depois de iniciar é reconciliada pelo GET, sem repetir a autorização.
+- A lista final exclui documentos bloqueados/excluídos. Divergência entre elegíveis locais e resumo do servidor bloqueia a autorização. O processador preservado revalida destinatário e arquivo antes do envio.
+- A consulta de quota usa `dailyCampaignUsage` e `sendingDayWindow`, incluindo mensagens reservadas e excluindo outros proprietários; não modifica quota nem reserva capacidade.
+- Acompanhamento diferencia aceitação pelo Gmail, devolução e resultado incerto. Próxima execução só aparece com agendamento persistido válido. Pausa/cancelamento não desfazem mensagens cuja execução já começou.
+- Retomada bloqueada por itens em processamento/incertos; encerramento manual de incerto conserva a evidência sem solicitar reenvio. CSV e acesso aos lotes históricos preservados.
+
+### Arquivos desta entrega
+
+| Arquivos | Mudança |
+| --- | --- |
+| `app/smart-sends-page.tsx` | Integração das cinco fases, configuração na Confirmação, reconciliação de operações e polling restrito ao Acompanhamento |
+| `app/smart-sends.css` | Layout, densidade e responsividade das duas fases finais |
+| `components/smart-sends/confirmation-step.tsx` | Nova tela de configuração, resumo, relação final e autorização |
+| `components/smart-sends/monitor-step.tsx` | Novo painel de progresso, filtros e controles |
+| `components/smart-sends/send-view-state.ts` | Tipos, elegibilidade, contadores, rótulos, filtros e datas |
+| `lib/smart-send-queries.ts` | Campos adicionais de leitura: assinatura, quota por proprietário e horários persistidos |
+| `scripts/test-smart-final-view.mjs` | Novos testes de elegibilidade, não agrupamento, filtros, contadores, incertos e horários |
+| `scripts/test-smart-sends.mjs` | Integração de quota compartilhada e autorização somente de aprovados |
+| `scripts/test-smart-import-contract.mjs` | Mock atualizado para a consulta adicional de quota |
+| `scripts/test-smart-ui.mjs` | Fluxo das cinco fases, anexos, revisão desatualizada, resposta perdida, controles e 100 documentos |
+| `docs/smart-sends.md`, `docs/smart-sends-audit.md` | Funcionamento, auditoria e publicação |
+
+Os componentes das etapas anteriores foram reaproveitados. Não há migration nem mudança de `.env` nesta entrega.
+
+### Validação executada
+
+**312 testes aprovados:** 167 de Envios Inteligentes e 145 de regressão dos mecanismos tradicionais. Unitários, integração PGlite com serviços reais e Gmail/Storage simulados, contratos HTTP, autenticação e parser no workerd local. A suíte inicialmente revelou um mock de consulta desatualizado; corrigido, a execução final dos 167 passou integralmente.
+
+Cobertura: um PDF; dezenas/100 PDFs; CNPJ único/múltiplo/ausente; nome de arquivo sugestivo; empresa inexistente; texto insuficiente/corrupção; associação manual e ID string; proprietário divergente; e-mail ausente/inválido; duplicatas/exclusões; troca de empresa confirmada; navegação sem mutações; falha de rede; recuperação de importação; confirmação desatualizada; pausa/cancelamento; aceitação, devolução e resultado Gmail incerto.
+
+**74 verificações de navegador aprovadas:** 31 no fluxo inteligente, sete na gestão/histórico de lotes, 24 em campanhas tradicionais e 12 em e-mails/templates/anexos. Edge headless, desktop de 1440 px e mobile emulado de 390 px; APIs integralmente interceptadas. Capturas das novas fases inspecionadas visualmente, com atenção a legibilidade, estados, teclado/foco e ausência de overflow horizontal. São testes locais com mocks, não ensaios de dispositivos físicos ou entrega real.
+
+TypeScript, lint e build concluídos sem erros. Build mantém os avisos existentes de chunks acima de 500 kB e classificação estática de rotas pelo Vinext. `git diff --check` sem erros de whitespace.
+
+```powershell
+# Unitários e integração do módulo
+$smartTests = @(Get-ChildItem scripts/test-smart-*.mjs |
+  Where-Object { $_.Name -notmatch 'ui' } | ForEach-Object { $_.FullName })
+node --test --test-concurrency=1 $smartTests
+
+# Regressões tradicionais e política de publicação
+node --test scripts/test-campaign-runner.mjs scripts/test-campaign-countdown.mjs scripts/test-individual-send.mjs scripts/test-email-attachments.mjs scripts/test-gmail-delivery.mjs scripts/test-gmail-oauth.mjs scripts/test-settings-timezone.mjs scripts/test-worker-cron.mjs scripts/test-deploy-policy.mjs
+
+node node_modules/typescript/bin/tsc --noEmit
+node node_modules/eslint/bin/eslint.js . --ignore-pattern dist --ignore-pattern .next
+node scripts/run-framework.mjs build
+
+# Servidor estritamente local, em outro terminal, sem --remote:
+node --import ./scripts/load-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --port 5174 --inspector-port 0 --log-level error
+
+# Navegador: todos os endpoints de aplicação são simulados pelos testes
+$env:SMART_UI_TEST_URL = 'http://127.0.0.1:5174/workspace'
+$env:CAMPAIGN_TEST_URL = 'http://127.0.0.1:5174'
+$env:EMAIL_TEST_URL = 'http://127.0.0.1:5174'
+node scripts/test-smart-ui.mjs
+node scripts/test-smart-batch-ui.mjs
+node scripts/test-campaign-ui.mjs
+node scripts/test-email-ui.mjs
+```
+
+Evidências locais, ignoradas pelo Git: `outputs/smart-final-tests.txt`; relatórios JSON e capturas em `outputs/smart-qa`, `outputs/smart-batch-qa`, `outputs/campaign-qa` e `outputs/attachments-qa`. Os testes usam endereços `.test` e nunca iniciam envios reais.
+
+### Limitações, riscos e recomendações
+
+- A paginação limita o DOM, não a resposta de detalhe: o servidor continua devolvendo o lote completo, limitado pelas regras existentes (teto de 500 PDFs). Não houve ensaio de carga com 500 PDFs grandes. Avaliar payload, memória e latência antes de elevar limites.
+- A quota é um retrato compartilhado, não uma reserva; outras operações podem consumir saldo. Horário de agendamento não garante execução pontual. Gmail, cron e rede reais não são exercitados pelos mocks.
+- PGlite não reproduz a latência/contenção do Supabase remoto. CPU e limites reais do Worker exigem homologação separada. Não houve alteração de infraestrutura para contornar esses limites.
+- Horários ausentes no banco aparecem como não informados. Não se infere entrega, início de processamento ou previsão de conclusão.
+- PDF depende do visualizador do navegador, com link alternativo. Não foi adicionado OCR, agrupamento de PDFs, reenvio de incertos ou confirmação coletiva de associações.
+- Template/assinatura exibidos como prévia são snapshots preparados; alterações posteriores exigem preparar novamente. Revisar a prévia individual antes de autorizar.
+- Avisos de tamanho de chunks permanecem; otimização global do CRM fica fora deste escopo. Homologar também Safari/iOS e navegação assistiva antes de ampliar a operação.
+
+### Publicação do redesign — somente após autorização
+
+1. Revisar o diff e registrar a versão/commit. Instalar pelo lockfile (`corepack pnpm install --frozen-lockfile`) e repetir as verificações acima no ambiente de publicação.
+2. Confirmar que a instalação já contém as migrações e o bucket privado das etapas anteriores, sem reaplicá-los. Esta etapa não requer migração, nova variável, mudança OAuth ou alteração de crons. Se o módulo ainda não existe no ambiente, tratar a instalação original da documentação como operação separada e autorizada.
+3. Após autorização explícita de publicação, usar `corepack pnpm deploy`. O script existente refaz o build com `CLOUDFLARE_DEPLOY=1`, valida o artefato e publica o Worker `crm-sindicato` com `--keep-vars`. Não publicar diretamente um `dist` gerado para execução local, que pode conter configuração de desenvolvimento.
+4. Conferir as cinco fases com PDFs sintéticos e destinatários de teste em homologação; validar Access, isolamento, PDF privado, quota e CSV. Importar/revisar/preparar não exige iniciar e-mails. Qualquer teste de envio real deve ser autorizado à parte.
+5. Acompanhar erros e latência após publicação. Em regressão, reverter à versão anterior do Worker; estados persistidos permanecem compatíveis. Pausar o lote afetado quando necessário e nunca reenviar automaticamente itens incertos.
+
+Nenhum comando de publicação deste procedimento foi executado nesta auditoria.
 
 ## Etapa 2 — redesign da importação (13/10/2026)
 

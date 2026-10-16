@@ -1,30 +1,26 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Plus, RefreshCw, Send, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Plus, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ConfirmationStep } from '@/components/smart-sends/confirmation-step';
+import { MonitorStep } from '@/components/smart-sends/monitor-step';
+import { batchLabels, type SendDetail as Detail, type SendTemplate as Template } from '@/components/smart-sends/send-view-state';
 import { BatchManager } from '@/components/smart-sends/batch-manager';
 import { ReviewStep } from '@/components/smart-sends/review-step';
 import type { ReviewDocument } from '@/components/smart-sends/review-state';
-import type { ReviewInput, reviewOverview } from '@/lib/smart-review-policy';
+import type { ReviewInput } from '@/lib/smart-review-policy';
 import { IdentificationStep } from '@/components/smart-sends/identification-step';
-import { initialSmartStep, readingErrors, type SmartStep } from '@/components/smart-sends/identification-state';
+import { initialSmartStep, type SmartStep } from '@/components/smart-sends/identification-state';
 import { ImportStep } from '@/components/smart-sends/import-step';
 import { canRemoveUpload } from '@/components/smart-sends/import-state';
-import { formatFileSize, type Attachment } from '@/lib/attachments';
-import { type SmartLimits } from '@/lib/smart-send-policy';
 import { smartJson as api, identifyFile, importSnapshot, processImportQueue, restoreImportQueue, saveImportQueue, uploadPdf, type ImportEntry } from '@/lib/smart-import-client';
 import { toast } from 'sonner';
-type Item = ReviewDocument & { sendStatus: string; deliveryStatus: string; deliveryError: string | null; subject: string | null; body: string | null };
-type Batch = { id: number; name: string; status: string; revision: number; templateName: string | null; senderAddress: string | null; commonAttachments: Attachment[]; intervalSeconds: number; notice: string | null };
-type Detail = { reviewSummary?: ReturnType<typeof reviewOverview>; batch: Batch; items: Item[]; limits: SmartLimits; dailyLimit: number; sender: string | null; summary: { documents: number; companies: number; eligible: number; blocked: number; duplicates: number; withoutEmail: number; excluded: number } };
-type Template = { id: number; name: string; attachments: Attachment[] };
-const labels: Record<string, string> = { DRAFT: 'Rascunho', READY: 'Pronto para envio', RUNNING: 'Em execução', PAUSED: 'Pausado', COMPLETED: 'Concluído', CANCELLED: 'Cancelado', IDENTIFIED: 'Identificado', REVIEW_REQUIRED: 'Revisão necessária', COMPANY_NOT_FOUND: 'Empresa não cadastrada', NO_EMAIL: 'Sem e-mail', INVALID_EMAIL: 'E-mail inválido', DUPLICATE: 'Documento duplicado', READ_ERROR: 'Erro de leitura', UPLOADING: 'Analisando', PENDING: 'Pendente', PROCESSING: 'Em processamento', SENT: 'Aceito pelo Gmail', FAILED: 'Falha', SKIPPED: 'Ignorado', UNCERTAIN: 'Resultado incerto', NO_KNOWN_FAILURE: 'Sem falha conhecida', BOUNCED: 'Devolvido', DELIVERY_DELAYED: 'Entrega adiada' };
 export function SmartSendsPage() {
   const [data, setData] = useState<Detail | null>(null), [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState(''), [includeCommon, setIncludeCommon] = useState(false), [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [loading, setLoading] = useState(true), [uploads, setUploads] = useState<ImportEntry[]>([]);
-  const [preview, setPreview] = useState<string | null>(null), [activeStep, setActiveStep] = useState<SmartStep>('import');
-  const [reviewPage, setReviewPage] = useState(0);
+  const [activeStep, setActiveStep] = useState<SmartStep>('import');
+  const operationGuard = useRef(false);
   const [reviewNeedsSync, setReviewNeedsSync] = useState(false);
   const reviewGuard = useRef(false);
   const [messageDirty, setMessageDirty] = useState(false);
@@ -34,17 +30,34 @@ export function SmartSendsPage() {
   const selectedFiles = useRef(new Map<string, File>());
   const latestUploads = useRef(uploads);
   useEffect(() => { latestUploads.current = uploads; }, [uploads]);
-  const refresh = useCallback(async (id: number) => { const next = await api<Detail>('/' + id); setData(next); setReviewNeedsSync(false); return next; }, []);
+  const refresh = useCallback(async (id: number) => { const next = await api<Detail>('/' + id); setData(next); setConfirmed(false); setReviewNeedsSync(false); if (!['DRAFT', 'READY'].includes(next.batch.status)) setActiveStep(step => step === 'confirmation' ? 'monitor' : step); return next; }, []);
   useEffect(() => { let active = true; api<Template[]>('/templates').then(t => { if (active) setTemplates(t); }).catch(e => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
   const batchId = data?.batch.id, batchStatus = data?.batch.status;
-  useEffect(() => { if (!batchId || !['RUNNING', 'PAUSED', 'CANCELLED', 'COMPLETED'].includes(batchStatus || '')) return; const timer = setInterval(() => { void refresh(batchId).catch(() => setError('Não foi possível atualizar o progresso.')); }, 8000); return () => clearInterval(timer); }, [batchId, batchStatus, refresh]);
-  const run = async (work: () => Promise<void>) => { setBusy(true); setError(''); setConfirmed(false); try { await work(); } catch (e) { setError(e instanceof Error ? e.message : 'Falha na operação.'); } finally { setBusy(false); } };
+  useEffect(() => {
+    if (!batchId || activeStep !== 'monitor' || busy) return;
+    let active = true, timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      if (document.visibilityState !== 'hidden') {
+        try { const next = await api<Detail>('/' + batchId); if (active) { setData(next); setReviewNeedsSync(false); setError(''); } }
+        catch { if (active) setError('Não foi possível atualizar o progresso. Os dados exibidos são da última consulta.'); }
+      }
+      if (active) timer = setTimeout(() => void poll(), 8000);
+    };
+    timer = setTimeout(() => void poll(), 8000);
+    return () => { active = false; clearTimeout(timer); };
+  }, [batchId, batchStatus, activeStep, busy]);
+  const run = async (work: () => Promise<void>) => {
+    if (operationGuard.current) return;
+    operationGuard.current = true; setBusy(true); setError(''); setConfirmed(false);
+    try { await work(); } catch (e) { setError(e instanceof Error ? e.message : 'Falha na operação.'); }
+    finally { operationGuard.current = false; setBusy(false); }
+  };
   async function openBatch(id: number) {
-    const opened = await refresh(id); selectedFiles.current.clear(); setUploads([]); setActiveStep(initialSmartStep(opened.batch.status)); setReviewPage(0); setMessageDirty(false); setTemplateId(''); setIncludeCommon(false); setPaused(false); pauseRequested.current = false;
+    const opened = await refresh(id); selectedFiles.current.clear(); setUploads([]); setActiveStep(initialSmartStep(opened.batch.status)); setMessageDirty(false); setTemplateId(opened.batch.templateId ? String(opened.batch.templateId) : ''); setIncludeCommon(opened.batch.commonAttachments.length > 0); setPaused(false); pauseRequested.current = false;
     try { setUploads(restoreImportQueue(localStorage, id)); }
     catch { setError('Não foi possível ler a fila local. Selecione os PDFs novamente; cada hash será conferido no servidor.'); }
   }
-  async function create() { await run(async () => { const b = await api<{ id: number }>('', { name: `Documentos — ${new Date().toLocaleString('pt-BR')}` }); await refresh(b.id); selectedFiles.current.clear(); setUploads([]); setActiveStep('import'); setReviewPage(0); setMessageDirty(false); setPaused(false); pauseRequested.current = false; setTemplateId(''); setIncludeCommon(false); }); }
+  async function create() { await run(async () => { const b = await api<{ id: number }>('', { name: `Documentos — ${new Date().toLocaleString('pt-BR')}` }); await refresh(b.id); selectedFiles.current.clear(); setUploads([]); setActiveStep('import'); setMessageDirty(false); setPaused(false); pauseRequested.current = false; setTemplateId(''); setIncludeCommon(false); }); }
   async function upload(files: File[], recover = false) {
     if (!data || uploadGuard.current || busy) return;
     uploadGuard.current = true; setBusy(true); setImporting(true); setValidating(files.length > 0); setError(''); setConfirmed(false);
@@ -93,16 +106,23 @@ export function SmartSendsPage() {
     } catch (error) { setReviewNeedsSync(true); throw error; }
     finally { reviewGuard.current = false; setBusy(false); }
   };
-  const control = (action: string) => run(async () => { setData(await api<Detail>(`/${data!.batch.id}/control`, { action, revision: data!.batch.revision, confirmed })); if (action === 'start') navigate('monitor'); toast.success(action === 'start' ? 'Fila iniciada. O processamento continuará em segundo plano.' : 'Lote atualizado.'); });
+  const control = (action: string) => run(async () => {
+    try { setData(await api<Detail>(`/${data!.batch.id}/control`, { action, revision: data!.batch.revision, confirmed })); if (action === 'start') navigate('monitor'); toast.success(action === 'start' ? 'Autorização registrada. O processamento continuará em segundo plano.' : 'Lote atualizado.'); }
+    catch (error) { setReviewNeedsSync(true); throw error; }
+  });
+  const prepare = () => run(async () => {
+    try { setData(await api<Detail>(`/${data!.batch.id}/prepare`, { templateId: Number(templateId), includeCommon })); setMessageDirty(false); toast.success('Prévia salva. Confira os destinatários antes de autorizar.'); }
+    catch (error) { setReviewNeedsSync(true); throw error; }
+  });
+  const resolve = (id: string) => run(async () => {
+    try { await api(`/${data!.batch.id}/items/${id}/resolve`, { acknowledgeUncertain: true }); await refresh(data!.batch.id); toast.success('Resultado incerto preservado. Nenhum reenvio solicitado.'); }
+    catch (error) { setReviewNeedsSync(true); throw error; }
+  });
   const editing = data && ['DRAFT', 'READY'].includes(data.batch.status), ready = data?.batch.status === 'READY' && !messageDirty && !reviewNeedsSync && data.summary.eligible > 0;
-  const selected = templates.find(t => String(t.id) === templateId), selectedPreview = data?.items.find(i => i.id === preview) || data?.items.find(i => i.subject);
-  const counts = Object.fromEntries(['PENDING', 'PROCESSING', 'SENT', 'FAILED', 'SKIPPED', 'UNCERTAIN'].map(s => [s, data?.items.filter(i => i.sendStatus === s).length || 0]));
-  const finished = counts.SENT + counts.FAILED + counts.SKIPPED + counts.UNCERTAIN;
   const showingImport = activeStep === 'import';
   const steps: { id: SmartStep; label: string }[] = [{ id: 'import', label: 'Importação' }, { id: 'identification', label: 'Identificação' }, { id: 'review', label: 'Revisão' }, { id: 'confirmation', label: 'Confirmação' }, { id: 'monitor', label: 'Acompanhamento' }];
-  const reviewPages = Math.max(1, Math.ceil((data?.items.length || 0) / 25)), currentReviewPage = Math.min(reviewPage, reviewPages - 1);
   return <div className="smart-sends">{data && <Button className="smart-back" variant="ghost" disabled={busy} onClick={() => { setData(null); setUploads([]); setError(''); selectedFiles.current.clear(); }}><ArrowLeft aria-hidden="true" />Voltar aos lotes</Button>}<section className="page-intro compact"><div><p className="eyebrow">DOCUMENTOS PERSONALIZADOS</p><h1>Envios Inteligentes</h1><p>{data ? data.batch.name : 'Importe PDFs, revise os destinatários e acompanhe cada envio.'}</p></div><Button onClick={create} disabled={busy}><Plus />Novo lote</Button></section>
-    {data && <ol className="smart-steps" aria-label="Etapas do envio">{steps.map((step, i) => <li key={step.id} aria-current={activeStep === step.id ? 'step' : undefined} className={activeStep === step.id ? 'current' : ''}><button disabled={busy || (step.id === 'confirmation' ? !ready : step.id === 'monitor' ? !!editing : step.id !== 'import' && !data.items.length)} onClick={() => navigate(step.id)}><span>{i + 1}</span>{step.label}</button></li>)}</ol>}
+    {data && <ol className="smart-steps" aria-label="Etapas do envio">{steps.map((step, i) => <li key={step.id} aria-current={activeStep === step.id ? 'step' : undefined} className={activeStep === step.id ? 'current' : ''}><button disabled={busy || (step.id === 'confirmation' ? !editing || reviewNeedsSync || !data.summary.eligible : step.id === 'monitor' ? !!editing : step.id !== 'import' && !data.items.length)} onClick={() => navigate(step.id)}><span>{i + 1}</span>{step.label}</button></li>)}</ol>}
     {error && <div className="smart-error" role="alert">{error}<Button variant="outline" size="sm" onClick={() => void run(async () => { if (batchId) await refresh(batchId); else { setTemplates(await api<Template[]>('/templates')); } })} disabled={busy}>Tentar novamente</Button></div>}
     {loading && <p role="status">Carregando modelos de mensagem...</p>}{!data && <BatchManager disabled={busy} onOpen={id => void run(() => openBatch(id))} onDeleted={ids => {
       if (batchId && ids.includes(batchId)) { setData(null); setUploads([]); selectedFiles.current.clear(); }
@@ -111,14 +131,13 @@ export function SmartSendsPage() {
     {data && showingImport && <ImportStep key={data.batch.id} entries={uploads} documents={data.items} limits={data.limits} busy={busy} readOnly={!editing} importing={importing} validating={validating} paused={paused}
       onSelect={files => void upload(files)} onPause={() => { pauseRequested.current = true; setPaused(true); }} onResume={() => void upload([])} onRecover={() => void upload([], true)} onRemove={removeUpload} onContinue={() => navigate('identification')} />}
     {data && activeStep === 'identification' && <IdentificationStep key={data.batch.id} items={data.items} batchId={data.batch.id} busy={busy} onBack={() => navigate('import')} onContinue={() => navigate('review')} />}
-    {data && ['review', 'confirmation', 'monitor'].includes(activeStep) && <><section className="panel smart-panel"><div className="smart-heading"><div><h2 id="smart-batch-heading" tabIndex={-1}>{activeStep === 'review' ? 'Revisão dos destinatários' : activeStep === 'confirmation' ? 'Confirmação do lote' : data.batch.name}</h2><p>{labels[data.batch.status]}</p></div>{editing && <Button variant="outline" disabled={busy} onClick={() => navigate('identification')}><ArrowLeft aria-hidden="true" />Voltar à identificação</Button>}<Button variant="outline" disabled={busy} onClick={() => void run(async () => { await refresh(data.batch.id); })}><RefreshCw />Atualizar</Button></div>
-      {activeStep === 'monitor' && <><div className="smart-stats"><div><strong>{data.items.length}</strong>Total</div>{Object.entries(counts).map(([s, count]) => <div key={s}><strong>{count}</strong>{labels[s]}</div>)}</div><progress className="smart-progress" max={Math.max(1, data.items.length)} value={finished} aria-label="Progresso global" /><p>{finished} de {data.items.length} documentos com resultado. Aceitação pelo Gmail não comprova entrega.</p>{data.batch.notice && <p role="status" className="smart-notice">{data.batch.notice}</p>}<div className="smart-actions">{data.batch.status === 'RUNNING' && <Button disabled={busy} variant="outline" onClick={() => void control('pause')}>Pausar</Button>}{data.batch.status === 'PAUSED' && <Button disabled={busy || counts.UNCERTAIN > 0 || counts.PROCESSING > 0} onClick={() => void control('resume')}>Retomar</Button>}{['RUNNING', 'PAUSED'].includes(data.batch.status) && <Button variant="outline" disabled={busy} onClick={() => { if (window.confirm('Cancelar os itens pendentes? Um envio já iniciado pode terminar.')) void control('cancel'); }}>Cancelar pendentes</Button>}<a href={`/api/smart-sends/${data.batch.id}/report`}>Exportar relatório CSV</a></div></>}
-      {activeStep === 'review' && <ReviewStep key={data.batch.id} items={data.items} batchId={data.batch.id} busy={busy} readOnly={!editing} needsSync={reviewNeedsSync} summary={data.reviewSummary} onReview={review} />}
-      {activeStep === 'monitor' && !!data.items.length && <div className="smart-table-wrap"><table><caption>Documento → Empresa → E-mail destinatário</caption><thead><tr><th>Documento</th><th>CNPJ / Empresa</th><th>Destinatário</th><th>Identificação</th><th>Status</th><th>Ações</th></tr></thead><tbody>{data.items.slice(currentReviewPage * 25, (currentReviewPage + 1) * 25).map(item => <tr key={item.id} className={item.excluded ? 'excluded' : ''}><td><strong>{item.fileName}</strong><small>{formatFileSize(item.fileSize)}</small>{item.fileReady && !item.fileDeletedAt && <a href={`/api/smart-sends/${data.batch.id}/items/${item.id}/file`} target="_blank" rel="noreferrer">Visualizar PDF</a>}</td><td>{item.companyName || 'Associação pendente'}<small>{item.extractedCnpjs.join(', ') || item.companyCnpj || 'CNPJ não identificado'}</small></td><td>{item.recipient || 'Sem destinatário'}</td><td>{({ CNPJ: 'CNPJ no PDF', FILENAME: 'Nome do arquivo', MANUAL: 'Manual' } as Record<string, string>)[item.identificationMethod]}{item.candidates.length > 0 && <small>{item.candidates.length} sugestão(ões)</small>}</td><td><span className={`smart-status ${item.reviewStatus === 'READY' || item.sendStatus === 'SENT' ? 'ok' : ''}`}>{item.excluded ? 'Excluído do envio' : labels[item.sendStatus]}</span>{!editing && <small>{labels[item.deliveryStatus] || item.deliveryStatus}</small>}{(item.error || item.deliveryError) && <small>{readingErrors[item.error || ''] || item.error || item.deliveryError}</small>}</td><td>{item.sendStatus === 'UNCERTAIN' ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { if (window.confirm('O Gmail pode ter aceitado a mensagem. Encerrar este item sem reenviar e manter o resultado incerto no histórico?')) void run(async () => { await api(`/${data.batch.id}/items/${item.id}/resolve`, { acknowledgeUncertain: true }); await refresh(data.batch.id); }); }}>Encerrar sem reenviar</Button> : '—'}</td></tr>)}</tbody></table></div>}
-      {activeStep === 'monitor' && reviewPages > 1 && <nav className="smart-import-pagination" aria-label="Paginação da revisão"><Button variant="outline" size="sm" disabled={!currentReviewPage} onClick={() => setReviewPage(currentReviewPage - 1)}>Anterior</Button><span>Página {currentReviewPage + 1} de {reviewPages}</span><Button variant="outline" size="sm" disabled={currentReviewPage + 1 === reviewPages} onClick={() => setReviewPage(currentReviewPage + 1)}>Próxima</Button></nav>}
-    </section>
-    {editing && <section className="panel smart-panel"><div className="smart-heading"><div><h2>Mensagem e confirmação</h2><p>Cada e-mail contém exclusivamente o PDF da linha aprovada, além dos anexos comuns escolhidos.</p></div><ShieldCheck /></div>{activeStep === 'review' && <><label>Template<select value={templateId} disabled={busy} onChange={e => { setTemplateId(e.target.value); setConfirmed(false); setMessageDirty(true); }}><option value="">Selecione um template</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>{selected && selected.attachments.length > 0 && <label className="smart-check"><input type="checkbox" disabled={busy} checked={includeCommon} onChange={e => { setIncludeCommon(e.target.checked); setConfirmed(false); setMessageDirty(true); }} />Incluir anexos comuns do template em todos os e-mails: {selected.attachments.map(a => a.name).join(', ')}</label>}<Button disabled={busy || reviewNeedsSync || !templateId || !data.summary.eligible} onClick={() => void run(async () => { setData(await api<Detail>(`/${data.batch.id}/prepare`, { templateId: Number(templateId), includeCommon })); setMessageDirty(false); navigate('confirmation'); })}>Gerar revisão final</Button></>}
-      {activeStep === 'confirmation' && ready && <div className="smart-final"><h3>Confira antes de iniciar</h3><div className="smart-stats">{[[data.summary.documents, 'Documentos'], [data.summary.companies, 'Empresas'], [data.summary.eligible, 'Envios estimados'], [data.summary.blocked, 'Bloqueados'], [data.summary.duplicates, 'Duplicados'], [data.summary.withoutEmail, 'Sem destinatário'], [data.summary.excluded, 'Excluídos']].map(([n, label]) => <div key={label}><strong>{n}</strong>{label}</div>)}</div><p>Remetente: <strong>{data.batch.senderAddress}</strong> · Template: <strong>{data.batch.templateName}</strong></p><p>Um envio por bloco técnico, intervalo mínimo de {data.batch.intervalSeconds}s. Limite diário compartilhado: {data.dailyLimit}. Dois PDFs para a mesma empresa geram dois e-mails separados.</p><p>Anexos comuns confirmados: {data.batch.commonAttachments.map(a => a.name).join(', ') || 'Nenhum'}.</p><label>Prévia por documento<select value={selectedPreview?.id || ''} onChange={e => setPreview(e.target.value)}>{data.items.filter(i => i.reviewStatus === 'READY' && !i.excluded).map(i => <option key={i.id} value={i.id}>{i.fileName} → {i.companyName} → {i.recipient}</option>)}</select></label>{selectedPreview && <article className="smart-message"><strong>{selectedPreview.subject}</strong><pre>{selectedPreview.body}</pre><small>PDF individual: {selectedPreview.fileName}</small></article>}<label className="smart-check"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} />Conferi as associações e a prévia acima. Autorizo {data.summary.eligible} envios; itens bloqueados e excluídos serão ignorados.</label><Button disabled={busy || !confirmed} onClick={() => void control('start')}><Send />Confirmar e iniciar {data.summary.eligible} envios</Button></div>}
-    </section>}</>}
+    {data && activeStep === 'review' && <section className="panel smart-panel"><div className="smart-heading"><div><h2 id="smart-batch-heading" tabIndex={-1}>Revisão dos destinatários</h2><p>{batchLabels[data.batch.status]}</p></div><Button variant="outline" disabled={busy} onClick={() => navigate('identification')}><ArrowLeft aria-hidden="true" />Voltar à identificação</Button><Button variant="outline" disabled={busy} onClick={() => void run(async () => { await refresh(data.batch.id); })}><RefreshCw aria-hidden="true" />Atualizar</Button></div>
+      <ReviewStep key={data.batch.id} items={data.items} batchId={data.batch.id} busy={busy} readOnly={!editing} needsSync={reviewNeedsSync} summary={data.reviewSummary} onReview={review} />
+      {editing && <footer className="smart-import-footer"><p>{data.summary.eligible} documentos elegíveis. A próxima etapa prepara a mensagem; nenhum e-mail é enviado aqui.</p><Button disabled={busy || reviewNeedsSync || !data.summary.eligible} onClick={() => navigate('confirmation')}>Continuar para confirmação</Button></footer>}
+    </section>}
+    {data && activeStep === 'confirmation' && <ConfirmationStep key={data.batch.id} data={data} templates={templates} templateId={templateId} includeCommon={includeCommon} ready={!!ready} confirmed={confirmed} busy={busy} needsSync={reviewNeedsSync}
+      onTemplate={value => { setTemplateId(value); setIncludeCommon(false); setMessageDirty(true); setConfirmed(false); }} onCommon={value => { setIncludeCommon(value); setMessageDirty(true); setConfirmed(false); }}
+      onPrepare={() => void prepare()} onConfirm={setConfirmed} onStart={() => void control('start')} onBack={() => navigate('review')} onRefresh={() => void run(async () => { await refresh(data.batch.id); })} />}
+    {data && activeStep === 'monitor' && <MonitorStep key={data.batch.id} data={data} busy={busy} needsSync={reviewNeedsSync} onRefresh={() => void run(async () => { await refresh(data.batch.id); })} onControl={action => void control(action)} onResolve={id => void resolve(id)} />}
   </div>;
 }

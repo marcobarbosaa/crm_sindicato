@@ -1,12 +1,14 @@
 import { and, asc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
 import { getDb } from '@/db';
-import { companies, crmSettings, documentSendBatches as batches, documentSendItems as items, emailAccounts, emailTemplates, templateAttachments } from '@/db/schema';
+import { companies, crmSettings, documentSendBatches as batches, documentSendItems as items, emailAccounts, emailMessages, emailTemplates, templateAttachments } from '@/db/schema';
 import { storageConfig } from './attachment-storage';
 import { SmartSendError, smartLimits } from './smart-send-policy';
 import { importResult } from './smart-import-protocol';
 import { ownedBatch, ownedItems } from './smart-send-scope';
 import { parseSmartContract, smartNumericId } from './smart-send-contract';
 import { reviewOverview } from './smart-review-policy';
+import { dailyCampaignUsage } from './campaign-quota';
+import { sendingDayWindow } from './settings';
 
 // Explicit read projection: retain review previews and audit status, leave storage,
 // delivery cursors and leases in the database. Never use this for send decisions.
@@ -18,8 +20,8 @@ const detailItem = {
   recipient: items.recipient, extractedCnpjs: items.extractedCnpjs, candidates: items.candidates,
   identificationMethod: items.identificationMethod, reviewStatus: items.reviewStatus,
   confirmedAt: items.confirmedAt, excluded: items.excluded, subject: items.subject, body: items.body,
-  sendStatus: items.sendStatus, messageId: items.messageId, sentAt: items.sentAt, error: items.error,
-  deliveryStatus: items.deliveryStatus, deliveryError: items.deliveryError,
+  sendStatus: items.sendStatus, messageId: items.messageId, processingAt: items.processingAt, sentAt: items.sentAt, error: items.error,
+  deliveryStatus: items.deliveryStatus, deliveryError: items.deliveryError, deliveryCheckedAt: items.deliveryCheckedAt,
   createdAt: items.createdAt, updatedAt: items.updatedAt,
 };
 
@@ -36,7 +38,10 @@ export async function getSmartBatch(owner: string, id: number) {
   if (!batch) throw new SmartSendError('Lote não encontrado.', 404);
   if (batch.deletionRequestedAt) throw new SmartSendError('Lote em exclusão ou já excluído.', 409);
   const rows = await db.select(detailItem).from(items).where(and(ownedItems(owner, id), isNull(items.removedAt))).orderBy(asc(items.createdAt));
-  const [settings] = await db.select({ dailySendLimit: crmSettings.dailySendLimit }).from(crmSettings).where(eq(crmSettings.ownerId, owner));
+  const [settings] = await db.select({ dailySendLimit: crmSettings.dailySendLimit, signature: crmSettings.signature, timezone: crmSettings.timezone }).from(crmSettings).where(eq(crmSettings.ownerId, owner));
+  const { start, next } = sendingDayWindow(settings?.timezone);
+  const [{ used }] = await db.select({ used: sql<number>`count(*)` }).from(emailMessages).where(dailyCampaignUsage(owner, start, next));
+  const dailyLimit = settings?.dailySendLimit || 100;
   const [account] = await db.select({ email: emailAccounts.email }).from(emailAccounts).where(and(eq(emailAccounts.ownerId, owner), eq(emailAccounts.provider, 'GMAIL')));
   const candidateIds = new Set<number>();
   const companyIds = new Set<number | null>();
@@ -56,7 +61,9 @@ export async function getSmartBatch(owner: string, id: number) {
   const byId = new Map(suggestions.map(company => [Number(company.id), company]));
   return { batch: { ...batch, id: parseSmartContract(smartNumericId, batch.id, 'batch-detail-id') }, items: rows.map(row => ({ ...row, suggestions: [...new Set(row.candidates)].flatMap(id => {
     const company = byId.get(Number(id)); return company ? [company] : [];
-  }) })), summary, reviewSummary: reviewOverview(rows), limits: smartLimits(storageConfig), dailyLimit: settings?.dailySendLimit || 100, sender: account?.email || null };
+  }) })), summary, reviewSummary: reviewOverview(rows), limits: smartLimits(storageConfig), dailyLimit, sender: account?.email || null,
+    signature: settings?.signature || '', timezone: settings?.timezone || 'America/Sao_Paulo',
+    quota: { limit: dailyLimit, used: Number(used), available: Math.max(0, dailyLimit - Number(used)), resetsAt: next, checkedAt: new Date() } };
 }
 
 export async function getSmartImportStatus(owner: string, batchId: number) {

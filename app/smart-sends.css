@@ -1,4 +1,37 @@
 .smart-sends { display: grid; gap: 20px; min-width: 0; }
+.smart-sends .smart-confirmation-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 22px 0 14px; font-size: 14px; }
+.smart-sends .smart-confirmation-meta dt { font-size: 12px; color: #64748b; margin-bottom: 5px; }
+.smart-sends .smart-confirmation-meta dd { overflow-wrap: anywhere; }
+.smart-sends .smart-confirmation-config { margin-top: 24px; padding: 20px; border: 1px solid #e8edf3; border-radius: 12px; display: grid; gap: 16px; }
+.smart-sends .smart-confirmation-config label { margin-bottom: 0; }
+.smart-sends .smart-confirmation-config > button { justify-self: start; }
+.smart-sends .smart-confirmation-config details { font-size: 13px; }
+.smart-sends .smart-confirmation-config summary { cursor: pointer; }
+.smart-sends .smart-final-list { display: grid; gap: 8px; list-style: none; padding: 0; max-height: 470px; overflow-y: auto; }
+.smart-sends .smart-final-list button { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; border: 1px solid #e8edf3; border-radius: 9px; padding: 14px; width: 100%; text-align: left; font-size: 13px; overflow-wrap: anywhere; cursor: pointer; }
+.smart-sends .smart-final-list button[aria-pressed=true] { border-color: #2563eb; background: #eff6ff; }
+.smart-sends .smart-final-list button:disabled { cursor: default; }
+.smart-sends .smart-final-list small { grid-column: 1 / -1; }
+.smart-sends .smart-authorization { border: 1px solid #bfdbfe; background: #f8fbff; border-radius: 12px; padding: 20px; display: grid; gap: 12px; }
+.smart-sends .smart-authorization > svg { color: #1d4ed8; }
+.smart-sends .smart-authorization button { justify-self: start; }
+.smart-sends .smart-monitor-filters { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 14px; margin-top: 24px; }
+.smart-sends .smart-monitor-list { list-style: none; padding: 0; display: grid; gap: 12px; margin-top: 14px; }
+.smart-sends .smart-monitor-list > li { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 20px; padding: 18px; border: 1px solid #e8edf3; border-radius: 12px; font-size: 13px; }
+.smart-sends .smart-monitor-list > li > div { min-width: 0; overflow-wrap: anywhere; }
+.smart-sends .smart-monitor-document { display: grid; gap: 5px; align-content: start; }
+.smart-sends .smart-monitor-list button { margin-top: 12px; white-space: normal; height: auto; }
+.smart-sends .smart-monitor-error { color: #9f1239; margin-top: 8px; }
+.smart-sends .smart-monitor .smart-actions { margin-top: 20px; justify-content: flex-start; }
+@media (max-width: 800px) {
+  .smart-sends .smart-monitor-filters { grid-template-columns: minmax(0, 1fr); }
+  .smart-sends .smart-monitor-list > li { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}
+@media (max-width: 640px) {
+  .smart-sends .smart-confirmation-meta, .smart-sends .smart-final-list button { grid-template-columns: minmax(0, 1fr); }
+  .smart-sends .smart-confirmation-config, .smart-sends .smart-authorization { padding: 14px; }
+  .smart-sends .smart-authorization button, .smart-sends .smart-confirmation-config > button { width: 100%; white-space: normal; height: auto; min-height: 40px; }
+}
 .smart-sends .smart-review-workspace { display: grid; grid-template-columns: minmax(250px, .7fr) minmax(0, 1.6fr); gap: 24px; align-items: start; }
 .smart-sends .smart-review-sidebar { min-width: 0; background: #f8fafc; border: 1px solid #e8edf3; border-radius: 12px; padding: 16px; }
 .smart-sends .smart-review-filters label { font-size: 12px; }

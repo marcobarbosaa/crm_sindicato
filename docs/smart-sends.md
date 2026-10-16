@@ -1,6 +1,6 @@
 # Envios Inteligentes
 
-Implementação de 08/10/2026. Auditoria prévia: [smart-sends-audit.md](smart-sends-audit.md).
+Implementação inicial de 08/10/2026; redesign das cinco fases concluído em 16/10/2026. Resultados, limitações e publicação: [auditoria final](smart-sends-audit.md#etapa-5--auditoria-final-do-redesign-16102026).
 
 ## Funcionalidades
 
@@ -12,7 +12,7 @@ Todas as associações exigem confirmação por documento. O destinatário é o 
 
 ## Importação — interface da etapa 2
 
-Ao criar ou abrir um lote editável, a importação tem uma tela própria. Ela mostra nome do lote, etapa atual, navegação para os lotes, seleção múltipla/drag and drop e limites de documentos, bytes e páginas retornados pelo backend. Os resultados aparecem depois de **Continuar para identificação**; associação e configuração da mensagem ficam na **Revisão**. É possível voltar à importação e adicionar mais PDFs.
+Ao criar ou abrir um lote editável, a importação tem uma tela própria. Ela mostra nome do lote, etapa atual, navegação para os lotes, seleção múltipla/drag and drop e limites de documentos, bytes e páginas retornados pelo backend. Os resultados aparecem depois de **Continuar para identificação**; a associação fica na **Revisão** e a configuração da mensagem na **Confirmação**. É possível voltar à importação e adicionar mais PDFs.
 
 Os contadores acompanham a fila real e os documentos já existentes no lote. **100% transmitido** indica o término da transmissão; a linha continua em análise até a confirmação do servidor. Falhas de leitura, duplicatas e resultados incertos não contam como concluídos. A lista mostra 25 arquivos por página, com filtro de falhas e área de rolagem acessível por teclado; os totais incluem todas as páginas.
 
@@ -54,7 +54,25 @@ A interface só apresenta sucesso após gravar e reler o lote. Em caso de erro o
 
 Componentes: `review-step.tsx`, `company-picker.tsx` e `review-state.ts` em `components/smart-sends`; política compartilhada em `lib/smart-review-policy.ts`. Cobertura adicional em `test-smart-review.mjs`, `test-smart-company-picker.mjs`, `test-smart-sends.mjs` e `test-smart-ui.mjs`, incluindo falha de rede, resposta atrasada, troca de associação confirmada, 100 documentos e isolamento entre proprietários.
 
+## Confirmação e Acompanhamento — interface da etapa 5
+
+A **Confirmação** tem configuração de template, assinatura atual e anexos comuns opcionais, resumo do lote e relação **Documento → Empresa → E-mail**. Os totais distinguem empresas e destinatários únicos de quantidade de mensagens: dois PDFs aprovados para uma empresa continuam gerando dois e-mails. Bloqueados, excluídos e duplicatas aparecem no resumo. A relação apresenta 25 documentos por página, com acesso a todos os destinatários.
+
+**Gerar revisão final** revalida as associações e salva as prévias personalizadas no servidor. Cada documento permite consultar assunto, corpo com assinatura e anexos efetivamente preparados. Alterar template ou anexos invalida a prévia local e exige nova preparação. A autorização exige ciência explícita e envia a revisão persistida do lote; o servidor recusa revisão desatualizada. Preparar, navegar e revisar não iniciam envios.
+
+A quota exibida usa o mesmo proprietário, timezone e predicado dos processadores existentes, incluindo reservas de mensagens pendentes/incertas. É uma consulta, não uma reserva nem uma nova política. O resumo informa conta remetente, intervalo mínimo, horário da consulta e renovação diária; falta de saldo não cria estimativa de conclusão.
+
+O **Acompanhamento** mostra estado do lote, progresso e contadores de pendentes, em processamento, aceitos pelo Gmail, falhas, ignorados e incertos. Pesquisa arquivo/empresa/e-mail e filtra envio e monitoramento, mantendo os contadores globais. Cada documento mostra os horários disponíveis no servidor e eventuais erros. A próxima execução usa exclusivamente `nextRunAt` de um lote em execução, sem extrapolar horários. Aceitação e ausência de devolução não comprovam entrega.
+
+Pausa, retomada, cancelamento de pendentes, CSV e consulta dos lotes históricos permanecem disponíveis. Retomar fica bloqueado enquanto houver processamento ou resultado incerto; encerrar um incerto requer ciência explícita e usa a ação existente, sem reenviar. Erros de comunicação exigem sincronização antes de novas operações. Se o início foi gravado mas a resposta se perdeu, atualizar abre o acompanhamento do estado persistido.
+
+O acompanhamento consulta o servidor a cada oito segundos, sem sobreposição, apenas quando a fase está aberta, a aba visível e não há operação da interface em curso. Respostas de consultas antigas são descartadas ao sair da fase ou mudar de lote. As cinco fases usam navegação local; lotes iniciados permitem consultar as fases anteriores em modo de leitura.
+
+Componentes: `confirmation-step.tsx`, `monitor-step.tsx` e `send-view-state.ts` em `components/smart-sends`. O detalhe ganhou assinatura, quota e horários de processamento/monitoramento; schema, estados persistidos e mecanismo de envio foram preservados. Validação final: **312 testes unitários/integração/regressão e 74 verificações de navegador**, TypeScript, lint e build aprovados. Veja os comandos e limites da evidência na auditoria.
+
 ## Implantação manual
+
+As instruções abaixo incluem a instalação original do módulo. **A etapa 5 não cria migrações nem exige novas variáveis, permissões OAuth ou configurações Cloudflare.** Em uma instalação já atualizada até a etapa 4, seguir o procedimento de publicação do redesign na auditoria, sem reaplicar migrações.
 
 Nenhuma etapa abaixo foi executada em produção.
 

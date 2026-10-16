@@ -99,6 +99,6 @@ test('JSON real do serviço normaliza ID string e preserva os tipos dos itens', 
     for (const r of body.items) for (const [field, expected] of Object.entries({ documentId: 'string', contentHash: 'string', persistence: 'string', storage: 'string', analysis: 'string', message: 'string', recoverable: 'boolean' })) assert.equal(typeof r[field], expected);
     globalThis.fetch = async () => Response.json(body); assert.equal((await importSnapshot('1')).length, count);
   }
-  results = [[{ id: '1' }], [], [], []];
+  results = [[{ id: '1' }], [], [], [{ used: 0 }], []];
   assert.equal((await service.getSmartBatch('synthetic', 1)).batch.id, 1);
 });

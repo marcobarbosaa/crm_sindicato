@@ -11,9 +11,9 @@ const delay = ms => new Promise(r => setTimeout(r, ms)), pending = new Map(), er
 let socket, seq = 0, exists = false, scenario = '', failed = false;
 const imports = [];
 const template = { id: 1, name: 'Documentos mensais', attachments: [{ id: 'common', name: 'informativo.pdf', mimeType: 'application/pdf', size: 200 }] };
-const data = { batch: { id: 1, name: 'Documentos — demonstração', status: 'DRAFT', revision: 0, templateName: null, senderAddress: 'sender@example.test', commonAttachments: [], intervalSeconds: 60, notice: null }, items: [], summary: {},
+const data = { signature: 'Assinatura CRM', timezone: 'America/Sao_Paulo', quota: { available: 98, used: 2, limit: 100, resetsAt: '2026-10-17T03:00:00Z', checkedAt: '2026-10-16T12:00:00Z' }, batch: { id: 1, name: 'Documentos — demonstração', status: 'DRAFT', revision: 0, templateName: null, senderAddress: 'sender@example.test', commonAttachments: [], intervalSeconds: 60, notice: null }, items: [], summary: {},
   limits: { batchFiles: 100, fileBytes: 4194304, pages: 50 }, dailyLimit: 100, sender: 'sender@example.test' };
-function summary() { const eligible = data.items.filter(i => i.reviewStatus === 'READY' && !i.excluded); data.summary = { documents: data.items.length, companies: eligible.length, eligible: eligible.length, blocked: data.items.length - eligible.length, duplicates: 0, withoutEmail: data.items.filter(i => !i.recipient).length, excluded: 0 }; }
+function summary() { const eligible = data.items.filter(i => i.reviewStatus === 'READY' && i.confirmedAt && i.fileReady && !i.excluded), excluded = data.items.filter(i => i.excluded).length; data.summary = { documents: data.items.length, companies: new Set(eligible.map(i => i.companyId)).size, eligible: eligible.length, blocked: data.items.length - eligible.length - excluded, duplicates: data.items.filter(i => i.duplicateOf).length, withoutEmail: data.items.filter(i => !i.recipient).length, excluded }; }
 const send = (method, params = {}) => new Promise((resolve, reject) => { const id = ++seq; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })); });
 async function evaluate(expression) { const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails)); return r.result.value; }
 async function waitFor(expression) { for (let n = 0; n < 180; n++) { if (await evaluate(expression).catch(() => false)) return; await delay(100); } throw Error('Timeout: ' + expression); }
@@ -75,7 +75,18 @@ async function mock({ requestId, request }) {
     for (const item of data.items) { item.subject = 'Documento para ' + item.companyName; item.body = 'Olá, segue seu documento.\n\nAssinatura CRM'; }
     summary(); body = data;
   } else if (path.endsWith('/control')) {
-    const input = JSON.parse(request.postData); assert.equal(input.confirmed, true); assert.equal(input.revision, data.batch.revision); data.batch.status = 'RUNNING'; data.items.forEach(i => { i.sendStatus = 'PENDING'; }); summary(); body = data;
+    const input = JSON.parse(request.postData);
+    if (input.action === 'start' && input.revision !== data.batch.revision) { status = 409; body = { code: 'REQUEST_REJECTED', error: 'Revise o lote atualizado e confirme explicitamente.' }; }
+    else {
+      if (input.action === 'start') { assert.equal(input.confirmed, true); data.batch.status = 'RUNNING'; data.batch.confirmedAt = new Date().toISOString(); data.batch.nextRunAt = new Date().toISOString(); data.items.forEach(i => { i.sendStatus = 'PENDING'; }); }
+      if (input.action === 'pause') data.batch.status = 'PAUSED';
+      if (input.action === 'resume') { assert.equal(data.items.some(i => ['UNCERTAIN', 'PROCESSING'].includes(i.sendStatus)), false); data.batch.status = 'RUNNING'; }
+      if (input.action === 'cancel') { data.batch.status = 'CANCELLED'; data.items.forEach(i => { if (i.sendStatus === 'PENDING') i.sendStatus = 'SKIPPED'; }); }
+      summary(); body = data;
+      if (scenario === 'start-lost') { await send('Fetch.failRequest', { requestId, errorReason: 'ConnectionReset' }); return; }
+    }
+  } else if (path.endsWith('/resolve')) {
+    const item = data.items.find(i => path.includes(i.id)); item.sendStatus = 'SKIPPED'; item.error = 'Resultado incerto encerrado manualmente sem reenvio.'; body = { ok: true };
   } else if (path === '/api/smart-sends/1') { summary(); body = data; if (scenario === 'refresh' && imports.length === 100) { status = 503; body = { code: 'SERVICE_UNAVAILABLE', error: 'Falha na atualização.' }; } }
   await send('Fetch.fulfillRequest', { requestId, responseCode: status, responseHeaders: [{ name: 'content-type', value: 'application/json' }], body: Buffer.from(JSON.stringify(body)).toString('base64') });
 }
@@ -84,7 +95,7 @@ try {
   if (!targets) throw Error('Browser unavailable');
   socket = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl); await new Promise(r => socket.addEventListener('open', r, { once: true }));
   socket.addEventListener('message', event => { const m = JSON.parse(event.data); if (m.id) { const p = pending.get(m.id); pending.delete(m.id); if (m.error) p?.reject(Error(JSON.stringify(m.error))); else p?.resolve(m.result); }
-    else if (m.method === 'Fetch.requestPaused') void mock(m.params).catch(e => errors.push(String(e))); else if (m.method === 'Runtime.exceptionThrown') errors.push(JSON.stringify(m.params.exceptionDetails)); });
+    else if (m.method === 'Fetch.requestPaused') void mock(m.params).catch(e => errors.push(String(e))); else if (m.method === 'Page.javascriptDialogOpening') void send('Page.handleJavaScriptDialog', { accept: true }); else if (m.method === 'Runtime.exceptionThrown') errors.push(JSON.stringify(m.params.exceptionDetails)); });
   await send('Page.enable'); await send('Runtime.enable'); await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/*' }] });
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: process.env.SMART_UI_TEST_URL || 'http://localhost:5174/workspace' });
@@ -159,16 +170,39 @@ try {
   assert.deepEqual(data, beforeNavigation);
   assert.equal(requests.filter(r => r.path.startsWith('/api/smart-sends')).length, requestsBeforeNavigation);
   checks.push('navigation uses persisted results, no requests, no mutations, confirmed associations preserved');
+  assert.equal(await evaluate("!!document.querySelector('.smart-sends select option[value=\"1\"]')"), false);
+  await click('Continuar para confirmação');
+  assert.equal(requests.filter(r => r.path.endsWith('/control')).length, 0);
+  assert.equal(await evaluate("document.querySelectorAll('.smart-final-list li').length"), 2);
   await evaluate("(()=>{const s=[...document.querySelectorAll('.smart-sends select')].find(s=>s.textContent.includes('Selecione um template'));s.value='1';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
-  await click('Gerar revisão final'); await waitFor("!!document.querySelector('.smart-final')");
+  await click('Gerar revisão final'); await waitFor("!!document.querySelector('.smart-authorization')");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Confirmar e iniciar')).disabled"), true);
   assert.equal(data.batch.commonAttachments.length, 0); checks.push('common attachments opt-in, preview with signature and explicit final confirmation'); await screenshot('desktop-confirmation');
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }); await delay(200); await screenshot('mobile-confirmation');
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true); checks.push('mobile without page overflow');
-  await evaluate("document.querySelector('.smart-final input[type=checkbox]').click()"); await click('Confirmar e iniciar 2 envios');
+  await evaluate("document.querySelector('.smart-final input[type=checkbox]').click()"); data.batch.revision++;
+  await click('Confirmar e iniciar 2 envios'); await waitFor("document.querySelector('[role=alert]')?.textContent.includes('lote atualizado')");
+  assert.equal(data.batch.status, 'READY'); await click('Tentar novamente');
+  assert.equal(await evaluate("document.querySelector('.smart-authorization input').checked"), false);
+  scenario = 'start-lost'; await evaluate("document.querySelector('.smart-final input[type=checkbox]').click()"); await click('Confirmar e iniciar 2 envios');
+  await waitFor("document.querySelector('[role=alert]')?.textContent.includes('conexão')");
+  assert.equal(data.batch.status, 'RUNNING'); scenario = ''; await click('Tentar novamente');
   await waitFor("document.querySelector('.smart-actions')?.textContent.includes('Pausar')");
-  assert.equal(requests.filter(r => r.path.endsWith('/control')).length, 1); assert.equal(await evaluate("document.querySelector('.smart-sends').textContent.includes('não comprova entrega')"), true);
+  assert.equal(requests.filter(r => r.path.endsWith('/control')).length, 2); assert.equal(await evaluate("document.querySelector('.smart-sends').textContent.includes('não comprova entrega')"), true);
+  checks.push('stale authorization rejected; lost start response reconciles without repeating authorization');
   checks.push('monitor and accurate Gmail acceptance wording'); await screenshot('mobile-monitor'); assert.deepEqual(errors, []);
+  await click('Pausar'); await click('Retomar');
+  data.items[0].sendStatus = 'UNCERTAIN'; data.batch.status = 'PAUSED'; await click('Atualizar');
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Retomar').disabled"), true);
+  await screenshot('mobile-monitor-uncertain'); await click('Encerrar sem reenviar'); await click('Retomar');
+  assert.equal(data.items[0].sendStatus, 'SKIPPED');
+  await click('Cancelar pendentes'); assert.equal(data.batch.status, 'CANCELLED');
+  const controlsBeforeFilters = requests.filter(r => r.path.endsWith('/control')).length;
+  await evaluate("(()=>{const s=document.querySelector('.smart-monitor-filters select');s.value='SKIPPED';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  assert.equal(await evaluate("document.querySelectorAll('.smart-monitor-list > li').length"), 2);
+  assert.equal(requests.filter(r => r.path.endsWith('/control')).length, controlsBeforeFilters);
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }); await screenshot('desktop-monitor-cancelled');
+  checks.push('pause/resume/cancel respect transitions; uncertain outcome blocks resume and is closed without resend; filters are read-only');
   const selectVolume = async count => evaluate(`(()=>{const dt=new DataTransfer();for(let n=1;n<=${count};n++){const name='volume-'+n+'.pdf';dt.items.add(new File(['%PDF-synthetic-'+name],name,{type:'application/pdf'}));}const el=document.querySelector('#smart-files');el.files=dt.files;el.dispatchEvent(new Event('change',{bubbles:true}));})()`);
   for (const count of [1, 10, 26, 30, 50, 100]) {
     scenario = count === 100 ? 'refresh' : ''; await click('Novo lote');
@@ -199,6 +233,40 @@ try {
       assert.equal(await evaluate("document.querySelectorAll('.smart-review-detail').length"), 1);
       await screenshot('desktop-review-100');
       checks.push('identification and review render at most 25 documents with full-batch counts');
+      // Seed individually approved server records to exercise large final views.
+      for (const item of data.items) Object.assign(item, { companyId: 1, companyName: 'Empresa Alfa', companyCnpj: '11222333000181', recipient: 'alfa@example.test', confirmedAt: new Date().toISOString(), reviewStatus: 'READY' });
+      await click('Atualizar'); await click('Continuar para confirmação');
+      assert.equal(data.summary.companies, 1); assert.equal(data.summary.eligible, 100);
+      assert.equal(await evaluate("document.querySelectorAll('.smart-final-list li').length"), 25);
+      await evaluate("(()=>{const s=document.querySelector('.smart-confirmation-config select');s.value='1';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+      await click('Gerar revisão final');
+      await evaluate("document.querySelector('.smart-confirmation-config input[type=checkbox]').click()");
+      await waitFor("!document.querySelector('.smart-authorization')");
+      assert.equal(await evaluate("!!document.querySelector('.smart-message')"), false);
+      await click('Gerar revisão final'); assert.equal(data.batch.commonAttachments.length, 1);
+      await click('Próxima'); await click('Próxima'); await click('Próxima');
+      assert.equal(await evaluate("document.querySelector('.smart-final-list li:last-child strong').textContent"), 'volume-100.pdf');
+      await evaluate("document.querySelector('.smart-final-list li:last-child button').click()");
+      await waitFor("document.querySelector('.smart-message h4')?.textContent==='volume-100.pdf'");
+      await screenshot('desktop-confirmation-100');
+      await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }); await screenshot('mobile-confirmation-100');
+      assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+      await evaluate("document.querySelector('.smart-authorization input').click()"); await click('Confirmar e iniciar 100 envios');
+      assert.equal(data.items.filter(i => i.sendStatus === 'PENDING').length, 100);
+      await waitFor("document.querySelectorAll('.smart-monitor-list > li').length===25");
+      await click('Próxima'); assert.equal(await evaluate("document.querySelector('.smart-monitor-document strong').textContent"), 'volume-26.pdf');
+      Object.assign(data.items[0], { sendStatus: 'SENT', sentAt: '2026-10-16T12:00:00Z', updatedAt: '2026-10-16T12:00:00Z', deliveryStatus: 'NO_KNOWN_FAILURE', deliveryCheckedAt: '2026-10-16T12:01:00Z' });
+      await click('Atualizar');
+      const beforeMonitorFilters = structuredClone(data);
+      await evaluate("(()=>{const s=document.querySelector('.smart-monitor-filters select');s.value='SENT';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+      await waitFor("document.querySelectorAll('.smart-monitor-list > li').length===1");
+      assert.equal(await evaluate("document.querySelector('[data-send-count=SENT] strong').textContent"), '1');
+      assert.equal(await evaluate("document.querySelector('.smart-monitor-list').textContent.includes('Aceito em:')"), true);
+      await screenshot('mobile-monitor-accepted');
+      await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }); await screenshot('desktop-monitor-accepted');
+      assert.deepEqual(data, beforeMonitorFilters);
+      checks.push('100 approved PDFs for one company remain 100 messages; all recipients and individual previews reachable with 25 rows');
+      checks.push('common attachment change invalidates preview; monitoring pagination, acceptance timestamps and filters preserve server data');
     }
     checks.push(`${count} PDFs in browser, confirmed individually`);
   }

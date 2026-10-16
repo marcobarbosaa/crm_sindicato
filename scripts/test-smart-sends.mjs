@@ -99,6 +99,34 @@ async function prepared(count = 1) {
 }
 async function start(count = 1) { const batch = await prepared(count); await service.controlSmartBatch(owner, batchId, 'start', batch.revision, true); }
 
+test('resumo diário usa a quota compartilhada real, assinatura e timezone sem contar outro proprietário', async () => {
+  await db.update(crmSettings).set({ dailySendLimit: 5, timezone: 'UTC', signature: 'Assinatura configurada' });
+  const now = new Date();
+  for (const status of ['SENT', 'SENDING', 'UNCERTAIN', 'QUEUED', 'FAILED']) await db.insert(emailMessages).values({ ownerId: owner, recipient: 'quota@example.test', subject: 'quota', body: 'quota', status, sentAt: status === 'SENT' ? now : null, createdAt: now });
+  await db.insert(emailMessages).values({ ownerId: 'foreign', recipient: 'quota@example.test', subject: 'quota', body: 'quota', status: 'SENT', sentAt: now, createdAt: now });
+  const detail = await service.getSmartBatch(owner, batchId);
+  assert.equal(detail.quota.used, 4); assert.equal(detail.quota.available, 1); assert.equal(detail.quota.limit, 5);
+  assert.equal(detail.signature, 'Assinatura configurada'); assert.equal(detail.timezone, 'UTC'); assert.ok(detail.quota.resetsAt > now);
+  assert.equal(sends.length, 0);
+});
+test('autorização registra horário e ignora excluídos e não aprovados sem enviar durante preparação', async () => {
+  const approved = await upload('11222333000181 documento aprovado', 'aprovado.pdf');
+  const excluded = await upload('11222333000181 documento excluido', 'excluido.pdf');
+  await upload('sem destinatario', 'pendente.pdf');
+  await service.reviewSmartItem(owner, batchId, approved.id, { confirm: true });
+  await service.reviewSmartItem(owner, batchId, excluded.id, { excluded: true });
+  await service.prepareSmartBatch(owner, batchId, templateId, false);
+  const before = await service.getSmartBatch(owner, batchId);
+  assert.equal(sends.length, 0); assert.equal(before.batch.confirmedAt, null);
+  await assert.rejects(service.controlSmartBatch(owner, batchId, 'start', before.batch.revision - 1, true));
+  await service.controlSmartBatch(owner, batchId, 'start', before.batch.revision, true);
+  const after = await service.getSmartBatch(owner, batchId);
+  assert.ok(after.batch.confirmedAt); assert.equal(after.batch.status, 'RUNNING');
+  assert.equal(after.items.filter(item => item.sendStatus === 'PENDING').length, 1);
+  assert.equal(after.items.filter(item => item.sendStatus === 'SKIPPED').length, 2);
+  assert.equal(sends.length, 0);
+});
+
 test('revisão manual de múltiplos CNPJs permite escolha explícita e mantém confirmação individual', async () => {
   const item = await upload('Emissor 11444777000161 Destinataria 11222333000181');
   assert.equal(item.companyId, null);
