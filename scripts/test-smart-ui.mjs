@@ -4,6 +4,7 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { pdfFixture } from './smart-test-loader.mjs';
 const output = resolve('outputs/smart-qa'); mkdirSync(output, { recursive: true });
 const browser = spawn(process.env.CHROME_BINARY || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=9338', '--user-data-dir=' + mkdtempSync(join(tmpdir(), 'crm-smart-qa-')), 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 const delay = ms => new Promise(r => setTimeout(r, ms)), pending = new Map(), errors = [], requests = [], checks = [];
@@ -27,7 +28,7 @@ async function mock({ requestId, request }) {
   else if (path === '/api/smart-sends') { if (request.method === 'POST') { exists = true; data.items = []; imports.length = 0; data.batch.status = 'DRAFT'; body = { id: 1 }; } else body = exists ? [data.batch] : []; }
   else if (path === '/api/smart-sends/batches') body = { rows: exists ? [{ ...data.batch, createdAt: new Date().toISOString(), documents: data.items.length, pendingReview: data.items.length, sent: 0, pendingFiles: 0, deletionRequestedAt: null, deletionError: null }] : [], hasMore: false };
   else if (path === '/api/smart-sends/templates') body = [template];
-  else if (path === '/api/smart-sends/companies') body = [{ id: 2, name: 'Empresa Beta', primaryEmail: 'beta@example.test', cnpj: '11444777000161' }];
+  else if (path === '/api/smart-sends/companies') body = [{ id: '2', name: 'Empresa Beta', tradeName: 'Beta Serviços', primaryEmail: 'beta@example.test', cnpj: '11444777000161', primaryEmailStatus: 'UNKNOWN' }];
   else if (path.endsWith('/upload')) {
     const header = name => Object.entries(request.headers).find(([key]) => key.toLowerCase() === name)?.[1];
     const fileName = decodeURIComponent(header('x-file-name'));
@@ -38,8 +39,8 @@ async function mock({ requestId, request }) {
     }
     const first = data.items.length === 0;
     const item = { id: header('x-upload-id'), fileName, fileSize: 2100, fileReady: true, fileDeletedAt: null, readable: true,
-      companyId: first ? 1 : null, companyName: first ? 'Empresa Alfa' : null, recipient: first ? 'alfa@example.test' : null, companyCnpj: null,
-      extractedCnpjs: first ? ['11222333000181'] : [], candidates: first ? [1] : [2], suggestions: first ? [] : [{ id: 2, name: 'Empresa Beta', primaryEmail: 'beta@example.test' }], identificationMethod: first ? 'CNPJ' : 'FILENAME',
+      companyId: first ? 1 : null, companyName: first ? 'Empresa Alfa' : null, recipient: first ? 'alfa@example.test' : null, companyCnpj: first ? '11222333000181' : null,
+      extractedCnpjs: first ? ['11222333000181'] : [], candidates: first ? [1] : [2], suggestions: first ? [] : [{ id: '2', name: 'Empresa Beta', tradeName: 'Beta Serviços', cnpj: '11444777000161', primaryEmail: 'beta@example.test' }], identificationMethod: first ? 'CNPJ' : 'FILENAME',
       reviewStatus: first ? 'IDENTIFIED' : 'REVIEW_REQUIRED', confirmedAt: null, sendStatus: 'DRAFT', deliveryStatus: 'PENDING', excluded: false, error: null };
     body = { ok: true, documentId: header('x-upload-id'), contentHash: createHash('sha256').update('%PDF-synthetic-' + fileName).digest('hex'), persistence: 'persisted', storage: 'stored', analysis: 'complete', code: null, message: 'PDF salvo e analisado.', recoverable: false };
     if (scenario === 'mixed' && fileName === 'volume-1.pdf' && !header('x-recover-upload')) {
@@ -59,9 +60,15 @@ async function mock({ requestId, request }) {
     body = { batchId: 1, items: imports };
   } else if (path.includes('/items/') && request.method === 'PATCH') {
     const item = data.items.find(i => path.endsWith(i.id)), input = JSON.parse(request.postData);
-    if (input.companyId) Object.assign(item, { companyId: 2, companyName: 'Empresa Beta', recipient: 'beta@example.test', reviewStatus: 'IDENTIFIED', identificationMethod: 'MANUAL' });
+    assert.equal(input.expectedRevision, data.batch.revision);
+    if (input.confirm) assert.equal(input.expectedRecipient, item.recipient);
+    if (scenario === 'review-network') { await send('Fetch.failRequest', { requestId, errorReason: 'ConnectionReset' }); return; }
+    if (scenario === 'review-delay') await delay(1200);
+    if (input.companyId) { assert.equal(typeof input.companyId, 'number'); Object.assign(item, { companyId: 2, companyName: 'Empresa Beta', companyCnpj: '11444777000161', recipient: 'beta@example.test', reviewStatus: 'IDENTIFIED', identificationMethod: 'MANUAL', confirmedAt: null }); }
     if (input.confirm) { item.reviewStatus = 'READY'; item.confirmedAt = new Date().toISOString(); }
     data.batch.revision++; data.batch.status = 'DRAFT'; body = { ok: true };
+  } else if (path.endsWith('/file')) {
+    await send('Fetch.fulfillRequest', { requestId, responseCode: 200, responseHeaders: [{ name: 'content-type', value: 'application/pdf' }], body: Buffer.from(pdfFixture('Synthetic PDF for review')).toString('base64') }); return;
   } else if (path.endsWith('/prepare')) {
     const input = JSON.parse(request.postData); data.batch.status = 'READY'; data.batch.templateName = template.name; data.batch.revision++;
     data.batch.commonAttachments = input.includeCommon ? template.attachments : [];
@@ -104,11 +111,47 @@ try {
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await click('Revisar destinatários');
-  await waitFor("document.querySelectorAll('.smart-sends tbody tr').length===2");
-  await click('Confirmar associação'); await waitFor("document.querySelector('.smart-sends tbody tr').textContent.includes('Confirmado')");
-  await evaluate("document.querySelectorAll('.smart-associate')[1].open=true"); await click('Empresa Betabeta@example.test');
-  await waitFor("document.querySelectorAll('.smart-sends tbody tr')[1].textContent.includes('beta@example.test')"); await click('Confirmar associação');
-  await waitFor("document.querySelectorAll('.smart-status.ok').length===2"); await screenshot('desktop-review'); checks.push('manual association and individual confirmation');
+  await waitFor("document.querySelectorAll('.smart-review-list li').length===2");
+  assert.equal(await evaluate("!!document.querySelector('.smart-sends table')"), false);
+  scenario = 'review-network'; await click('Confirmar associação');
+  await waitFor("document.querySelector('.smart-review-detail [role=alert]')?.textContent.includes('conexão')");
+  assert.equal(data.items[0].confirmedAt, null);
+  assert.equal(await evaluate("document.querySelector('[data-review-count=Confirmados] strong').textContent"), '0');
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Confirmar associação').disabled"), true);
+  scenario = ''; await click('Atualizar');
+  scenario = 'review-delay'; await click('Confirmar associação');
+  assert.equal(await evaluate("document.querySelector('[data-review-count=Confirmados] strong').textContent"), '0');
+  await waitFor("document.querySelector('.smart-review-list li').textContent.includes('Confirmado')"); scenario = '';
+  checks.push('network failure never confirms optimistically; resynchronization required; delayed response remains pending');
+  await evaluate("document.querySelectorAll('.smart-review-list li button')[1].click()"); await evaluate("document.querySelector('.smart-company-picker li button').click()");
+  await waitFor("document.querySelector('.smart-review-association').textContent.includes('beta@example.test')"); await click('Confirmar associação');
+  await waitFor("document.querySelectorAll('.smart-review-list .smart-status.ok').length===2"); await screenshot('desktop-review'); checks.push('manual association and individual confirmation');
+  const requestsBeforeFilters = requests.length;
+  await evaluate("(()=>{const s=document.querySelector('.smart-review-filters select');s.value='confirmed';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  assert.equal(await evaluate("document.querySelectorAll('.smart-review-list li').length"), 2);
+  await evaluate("(()=>{const s=document.querySelector('.smart-review-filters select');s.value='pending';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  assert.equal(await evaluate("document.querySelectorAll('.smart-review-list li').length"), 0);
+  await evaluate("(()=>{const s=document.querySelector('.smart-review-filters select');s.value='all';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+  assert.equal(requests.length, requestsBeforeFilters); checks.push('review filters have no network requests or mutations');
+  await evaluate("document.querySelectorAll('.smart-review-list li button')[1].click()");
+  await click('Corrigir empresa'); await evaluate("document.querySelector('.smart-company-picker input').focus()");
+  await send('Input.insertText', { text: '11444777000161' });
+  await waitFor("!!document.querySelector('[aria-label=\"Resultados da pesquisa de empresas\"] li button')");
+  assert.equal(await evaluate("document.querySelector('.smart-company-picker').textContent.includes('Beta Serviços')"), true);
+  await evaluate("document.querySelector('.smart-company-picker li button').click()");
+  await waitFor("document.querySelector('[data-review-count=Confirmados] strong').textContent==='1'");
+  assert.equal(data.items[1].confirmedAt, null);
+  await click('Confirmar associação'); await waitFor("document.querySelector('[data-review-count=Confirmados] strong').textContent==='2'");
+  checks.push('changing a confirmed association requires a new explicit confirmation');
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await screenshot('mobile-review-detail'); assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+  await click('Lista de documentos'); await screenshot('mobile-review-list');
+  await evaluate("document.querySelector('.smart-review-list li button').click()");
+  await click('Carregar prévia do PDF'); await waitFor("document.querySelectorAll('.smart-review-preview iframe').length===1");
+  await screenshot('mobile-review-pdf');
+  await click('Ocultar prévia');
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  checks.push('mobile list/detail navigation and one PDF preview loaded only on demand');
   const beforeNavigation = structuredClone(data), requestsBeforeNavigation = requests.filter(r => r.path.startsWith('/api/smart-sends')).length;
   await click('Voltar à identificação');
   assert.equal(await evaluate("document.querySelectorAll('.smart-identification .smart-status.ok').length"), 2);
@@ -150,7 +193,11 @@ try {
       assert.equal(await evaluate("document.querySelector('.smart-identification-document h4').textContent"), 'volume-26.pdf');
       await screenshot('desktop-identification-100');
       await click('Revisar destinatários');
-      assert.equal(await evaluate("document.querySelectorAll('.smart-sends tbody tr').length"), 25);
+      assert.equal(await evaluate("document.querySelectorAll('.smart-review-list li').length"), 25);
+      await click('Próxima'); assert.equal(await evaluate("document.querySelector('.smart-review-list strong').textContent"), 'volume-26.pdf');
+      assert.equal(await evaluate("document.querySelector('[data-review-count=\"Total de documentos\"] strong').textContent"), '100');
+      assert.equal(await evaluate("document.querySelectorAll('.smart-review-detail').length"), 1);
+      await screenshot('desktop-review-100');
       checks.push('identification and review render at most 25 documents with full-batch counts');
     }
     checks.push(`${count} PDFs in browser, confirmed individually`);

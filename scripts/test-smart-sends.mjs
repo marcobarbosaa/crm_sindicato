@@ -99,6 +99,63 @@ async function prepared(count = 1) {
 }
 async function start(count = 1) { const batch = await prepared(count); await service.controlSmartBatch(owner, batchId, 'start', batch.revision, true); }
 
+test('revisão manual de múltiplos CNPJs permite escolha explícita e mantém confirmação individual', async () => {
+  const item = await upload('Emissor 11444777000161 Destinataria 11222333000181');
+  assert.equal(item.companyId, null);
+  await service.reviewSmartItem(owner, batchId, item.id, { companyId });
+  let detail = await service.getSmartBatch(owner, batchId);
+  assert.equal(detail.items[0].confirmedAt, null); assert.equal(detail.items[0].identificationMethod, 'MANUAL');
+  assert.deepEqual(detail.reviewSummary, { total: 1, pending: 1, confirmed: 0, blocked: 0, excluded: 0 });
+  await service.reviewSmartItem(owner, batchId, item.id, { confirm: true, expectedRevision: detail.batch.revision, expectedRecipient: 'alfa@example.test' });
+  detail = await service.getSmartBatch(owner, batchId);
+  assert.equal(detail.reviewSummary.confirmed, 1); assert.equal(sends.length, 0);
+});
+test('empresa inexistente e de outro proprietário não alteram associação', async () => {
+  const item = await upload(); const before = await db.select().from(items);
+  const [foreign] = await db.insert(companies).values({ ownerId: 'foreign', name: 'Privada', primaryEmail: 'private@example.test', createdAt: new Date(), updatedAt: new Date() }).returning();
+  for (const company of [999999, Number(foreign.id)]) await assert.rejects(service.reviewSmartItem(owner, batchId, item.id, { companyId: company }), /não encontrada/);
+  assert.deepEqual(await db.select().from(items), before);
+});
+test('empresa sem e-mail ou com e-mail inválido permanece bloqueada e sem confirmação', async () => {
+  const item = await upload();
+  for (const change of [{ primaryEmail: null }, { primaryEmail: 'bad' }, { primaryEmail: 'valid@example.test', primaryEmailStatus: 'INVALID' }]) {
+    await db.update(companies).set(change);
+    // Changing the address resets delivery status via the existing database trigger.
+    if (change.primaryEmailStatus) await db.update(companies).set({ primaryEmailStatus: change.primaryEmailStatus });
+    await service.reviewSmartItem(owner, batchId, item.id, { companyId });
+    await assert.rejects(service.reviewSmartItem(owner, batchId, item.id, { confirm: true }), /bloqueado/);
+    const detail = await service.getSmartBatch(owner, batchId);
+    assert.equal(detail.items[0].confirmedAt, null); assert.equal(detail.reviewSummary.blocked, 1);
+  }
+});
+test('trocar empresa confirmada invalida confirmação e prévia, sem enviar', async () => {
+  await prepared();
+  const [beta] = await db.insert(companies).values({ ownerId: owner, name: 'Beta', cnpj: '11444777000161', primaryEmail: 'beta@example.test', createdAt: new Date(), updatedAt: new Date() }).returning();
+  const detail = await service.getSmartBatch(owner, batchId);
+  await service.reviewSmartItem(owner, batchId, detail.items[0].id, { companyId: Number(beta.id), expectedRevision: detail.batch.revision });
+  const next = await service.getSmartBatch(owner, batchId);
+  assert.equal(next.batch.status, 'DRAFT'); assert.equal(next.items[0].confirmedAt, null); assert.equal(next.items[0].recipient, 'beta@example.test');
+  assert.equal(next.reviewSummary.pending, 1); assert.equal(next.summary.eligible, 0); assert.equal(sends.length, 0);
+});
+test('confirmação rejeita revisão desatualizada, destinatário alterado e exclusão', async () => {
+  const item = await upload(); const detail = await service.getSmartBatch(owner, batchId);
+  await assert.rejects(service.reviewSmartItem(owner, batchId, item.id, { confirm: true, expectedRevision: detail.batch.revision - 1 }), /alterado/);
+  await db.update(companies).set({ primaryEmail: 'new@example.test' });
+  await assert.rejects(service.reviewSmartItem(owner, batchId, item.id, { confirm: true, expectedRecipient: item.recipient }), /destinatário foi alterado/);
+  assert.equal((await service.getSmartBatch(owner, batchId)).items[0].confirmedAt, null);
+  await service.reviewSmartItem(owner, batchId, item.id, { excluded: true });
+  await assert.rejects(service.reviewSmartItem(owner, batchId, item.id, { confirm: true }), /Reinclua/);
+});
+test('catálogo pesquisa razão social, fantasia e CNPJ com ou sem máscara, restrito ao proprietário', async () => {
+  await db.update(companies).set({ tradeName: 'Fantasia Teste', cnpj: '11.222.333/0001-81' });
+  await db.insert(companies).values({ ownerId: 'foreign', name: 'Empresa Alfa', tradeName: 'Fantasia Teste', cnpj: '11222333000181', primaryEmail: 'private@example.test', createdAt: new Date(), updatedAt: new Date() });
+  for (const query of ['Empresa Alfa', 'Fantasia Teste', '11222333000181', '11.222.333/0001-81']) {
+    const rows = await service.smartCatalog(owner, query);
+    assert.equal(rows.length, 1); assert.equal(rows[0].id, companyId); assert.equal(rows[0].tradeName, 'Fantasia Teste'); assert.equal(rows[0].primaryEmailStatus, 'UNKNOWN');
+  }
+  assert.deepEqual(await service.smartCatalog(owner, '   '), []);
+});
+
 test('consulta de identificação preserva confirmações e não expõe candidatas de outro proprietário', async () => {
   await prepared();
   const [foreign] = await db.insert(companies).values({ ownerId: 'intruder', name: 'Privada', cnpj: '11444777000161', primaryEmail: 'private@example.test', createdAt: new Date(), updatedAt: new Date() }).returning();

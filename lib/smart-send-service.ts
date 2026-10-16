@@ -11,6 +11,7 @@ import { GMAIL_SEND_SCOPE } from './gmail';
 import { importResult, IMPORT_LEASE_MS } from './smart-import-protocol';
 import { ownedBatch, ownedItems } from './smart-send-scope';
 import { lockBatchImports, processBatchDeletion } from './smart-batch-management';
+import type { ReviewInput } from './smart-review-policy';
 
 export { ownedBatch, ownedItems } from './smart-send-scope';
 export { getSmartBatch, getSmartImportStatus, smartCatalog } from './smart-send-queries';
@@ -98,19 +99,24 @@ export async function uploadSmartPdf(owner: string, batchId: number, name: strin
   const [finished] = await db.select().from(items).where(and(ownedItems(owner, batchId), eq(items.id, id)));
   return importResult(finished);
 }
-export async function reviewSmartItem(owner: string, batchId: number, id: string, input: { companyId?: number; confirm?: boolean; excluded?: boolean; remove?: boolean }) {
+export async function reviewSmartItem(owner: string, batchId: number, id: string, input: ReviewInput) {
   return getDb().transaction(async tx => {
-    editable(await requireBatch(owner, batchId, tx));
+    const batch = await requireBatch(owner, batchId, tx); editable(batch);
+    if (input.expectedRevision !== undefined && input.expectedRevision !== batch.revision) throw new SmartSendError('O lote foi alterado. Atualize e confira a associação novamente.', 409);
     const [item] = await tx.select().from(items).where(and(ownedItems(owner, batchId), eq(items.id, id), isNull(items.removedAt))).for('update');
     if (!item) throw new SmartSendError('Documento não encontrado.', 404);
     if (item.importActiveAt || item.reviewStatus === 'UPLOADING') throw new SmartSendError('Aguarde ou reconcilie a importação antes de alterar o documento.', 409);
     if (input.remove) await tx.update(items).set({ removedAt: new Date(), excluded: true, confirmedAt: null }).where(eq(items.id, id));
     else {
       const companyId = input.companyId ?? item.companyId;
-      const [company] = companyId ? await tx.select().from(companies).where(and(eq(companies.id, companyId), eq(companies.ownerId, owner))) : [];
+      const [company] = companyId ? await tx.select().from(companies).where(and(eq(companies.id, companyId), eq(companies.ownerId, owner))).for('share') : [];
       if (input.companyId && !company) throw new SmartSendError('Empresa não encontrada.', 404);
       const status = item.duplicateOf ? 'DUPLICATE' : !item.fileReady || !item.readable || item.fileDeletedAt ? 'READ_ERROR' : recipientReview(company);
       if (input.confirm && status !== 'IDENTIFIED') throw new SmartSendError('Documento ou destinatário bloqueado.');
+      if (input.confirm && (input.excluded ?? item.excluded)) throw new SmartSendError('Reinclua o documento antes de confirmar a associação.');
+      if (input.confirm && input.expectedRecipient !== undefined && (input.expectedRecipient !== item.recipient || input.expectedRecipient !== company?.primaryEmail?.trim().toLowerCase())) {
+        throw new SmartSendError('O destinatário foi alterado. Selecione a empresa novamente e confira o e-mail antes de confirmar.', 409);
+      }
       await tx.update(items).set({ companyId: company?.id || null, companyName: company?.name || null, companyCnpj: company?.cnpj || null,
         recipient: company?.primaryEmail?.trim().toLowerCase() || null, identificationMethod: input.companyId ? 'MANUAL' : item.identificationMethod,
         reviewStatus: input.confirm ? 'READY' : status, confirmedAt: input.confirm ? new Date() : null, excluded: input.excluded ?? item.excluded, updatedAt: new Date() }).where(eq(items.id, id));

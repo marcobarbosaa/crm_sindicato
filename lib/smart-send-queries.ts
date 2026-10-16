@@ -1,4 +1,4 @@
-import { and, asc, eq, ilike, inArray, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { companies, crmSettings, documentSendBatches as batches, documentSendItems as items, emailAccounts, emailTemplates, templateAttachments } from '@/db/schema';
 import { storageConfig } from './attachment-storage';
@@ -6,6 +6,7 @@ import { SmartSendError, smartLimits } from './smart-send-policy';
 import { importResult } from './smart-import-protocol';
 import { ownedBatch, ownedItems } from './smart-send-scope';
 import { parseSmartContract, smartNumericId } from './smart-send-contract';
+import { reviewOverview } from './smart-review-policy';
 
 // Explicit read projection: retain review previews and audit status, leave storage,
 // delivery cursors and leases in the database. Never use this for send decisions.
@@ -50,12 +51,12 @@ export async function getSmartBatch(owner: string, id: number) {
     if (row.excluded) summary.excluded++;
   }
   summary.companies = companyIds.size;
-  const suggestions = candidateIds.size ? await db.select({ id: companies.id, name: companies.name, cnpj: companies.cnpj, primaryEmail: companies.primaryEmail }).from(companies)
+  const suggestions = candidateIds.size ? await db.select({ id: companies.id, name: companies.name, tradeName: companies.tradeName, cnpj: companies.cnpj, primaryEmail: companies.primaryEmail, primaryEmailStatus: companies.primaryEmailStatus }).from(companies)
     .where(and(eq(companies.ownerId, owner), inArray(companies.id, [...candidateIds]))) : [];
   const byId = new Map(suggestions.map(company => [Number(company.id), company]));
   return { batch: { ...batch, id: parseSmartContract(smartNumericId, batch.id, 'batch-detail-id') }, items: rows.map(row => ({ ...row, suggestions: [...new Set(row.candidates)].flatMap(id => {
     const company = byId.get(Number(id)); return company ? [company] : [];
-  }) })), summary, limits: smartLimits(storageConfig), dailyLimit: settings?.dailySendLimit || 100, sender: account?.email || null };
+  }) })), summary, reviewSummary: reviewOverview(rows), limits: smartLimits(storageConfig), dailyLimit: settings?.dailySendLimit || 100, sender: account?.email || null };
 }
 
 export async function getSmartImportStatus(owner: string, batchId: number) {
@@ -72,8 +73,13 @@ export async function getSmartImportStatus(owner: string, batchId: number) {
 
 export async function smartCatalog(owner: string, search?: string) {
   const db = getDb();
-  if (search !== undefined) return db.select({ id: companies.id, name: companies.name, cnpj: companies.cnpj, primaryEmail: companies.primaryEmail, primaryEmailStatus: companies.primaryEmailStatus }).from(companies)
-    .where(and(eq(companies.ownerId, owner), or(ilike(companies.name, `%${search.slice(0, 100)}%`), ilike(companies.tradeName, `%${search.slice(0, 100)}%`), ilike(companies.cnpj, `%${search.slice(0, 100)}%`)))).limit(30);
+  if (search !== undefined) {
+    const term = search.trim().slice(0, 100), digits = term.replace(/\D/g, '');
+    if (!term) return [];
+    return db.select({ id: companies.id, name: companies.name, tradeName: companies.tradeName, cnpj: companies.cnpj, primaryEmail: companies.primaryEmail, primaryEmailStatus: companies.primaryEmailStatus }).from(companies)
+      .where(and(eq(companies.ownerId, owner), or(ilike(companies.name, `%${term}%`), ilike(companies.tradeName, `%${term}%`), ilike(companies.cnpj, `%${term}%`),
+        digits.length >= 2 ? ilike(sql<string>`regexp_replace(${companies.cnpj}, '[^0-9]', '', 'g')`, `%${digits}%`) : undefined))).orderBy(asc(companies.name), asc(companies.id)).limit(30);
+  }
   const templates = await db.select().from(emailTemplates).where(eq(emailTemplates.ownerId, owner)).limit(100);
   const attachments = await db.select({ id: templateAttachments.id, name: templateAttachments.name, mimeType: templateAttachments.mimeType,
     size: templateAttachments.size, templateId: templateAttachments.templateId }).from(templateAttachments)

@@ -36,6 +36,24 @@ Identificação e Revisão renderizam 25 documentos por página; candidatas são
 
 Implementação: `components/smart-sends/identification-{state.ts,step.tsx}` e `app/smart-sends-page.tsx`. Regressões: `node --test scripts/test-smart-identification.mjs`, suíte `scripts/test-smart-*.mjs` e navegador `node scripts/test-smart-ui.mjs` com APIs simuladas. As evidências visuais ficam em `outputs/smart-qa`. TypeScript exclui `outputs`, assim como o lint, para não compilar cópias de código geradas pelas auditorias.
 
+## Revisão humana — interface da etapa 4
+
+A revisão usa uma lista lateral de 25 documentos por página e um painel para o documento selecionado. A prévia carrega apenas o PDF solicitado, pela rota privada que já verifica proprietário e integridade; há alternativa para abrir em outra aba. No mobile, a lista e os detalhes têm telas alternáveis. “Próximo pendente” facilita percorrer o lote sem abrir modais.
+
+Pesquisas de documento e empresa e filtros de pendentes, confirmados, bloqueados, excluídos, sem e-mail, e-mail inválido e duplicatas operam localmente sobre os dados recebidos, sem mutações. Os indicadores vêm de `reviewSummary`, derivado no servidor pela mesma política de apresentação do cliente. Pendentes, confirmados, bloqueados e excluídos são grupos distintos e somam o total; o resumo de envio existente permanece compatível.
+
+O seletor consulta razão social, nome fantasia e CNPJ, com ou sem máscara, sempre restrito ao proprietário. Retorna no máximo 30 empresas por busca e renderiza dez por página. Mostra nome, fantasia, CNPJ, destinatário e impedimentos do e-mail. O ID interno é normalizado de número ou string decimal para inteiro positivo seguro; CNPJ nunca é usado como `companyId`.
+
+Selecionar uma empresa salva a associação sem confirmá-la. O painel mostra **Documento → Empresa → Destinatário** antes do botão de confirmação. Corrigir uma associação confirmada remove a confirmação anterior e invalida a preparação do lote. Múltiplos CNPJs não impedem seleção manual válida; a ordem dos identificadores nunca escolhe uma empresa.
+
+As mutações da nova interface enviam `expectedRevision` e, na confirmação, `expectedRecipient`. Sob o bloqueio transacional existente do lote, revisões desatualizadas e endereços diferentes do exibido são recusados. Esses campos são opcionais para compatibilidade com os clientes anteriores. A empresa é lida com bloqueio compartilhado, validação de proprietário e e-mail; arquivos bloqueados e documentos excluídos não podem ser confirmados. Não há alteração de schema nem dos estados persistidos.
+
+A interface só apresenta sucesso após gravar e reler o lote. Em caso de erro ou resultado incerto, informa a causa, identifica a necessidade de sincronização e desabilita alterações e avanço até uma nova consulta bem-sucedida. A confirmação final exige ao menos um documento elegível. Nenhuma ação de revisão envia e-mails.
+
+**Confirmação em lote não foi incluída.** A API atual confirma individualmente e não valida atomicamente o resumo inteiro de múltiplas associações. Um laço de confirmações poderia gerar aprovação parcial ou trabalhar sobre um resumo alterado. Mantém-se a revisão explícita por documento nesta etapa.
+
+Componentes: `review-step.tsx`, `company-picker.tsx` e `review-state.ts` em `components/smart-sends`; política compartilhada em `lib/smart-review-policy.ts`. Cobertura adicional em `test-smart-review.mjs`, `test-smart-company-picker.mjs`, `test-smart-sends.mjs` e `test-smart-ui.mjs`, incluindo falha de rede, resposta atrasada, troca de associação confirmada, 100 documentos e isolamento entre proprietários.
+
 ## Implantação manual
 
 Nenhuma etapa abaixo foi executada em produção.

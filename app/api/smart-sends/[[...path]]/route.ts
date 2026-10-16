@@ -80,7 +80,8 @@ async function handle(request: NextRequest, context: Context) {
         }
         if (method === 'PATCH' && path.length === 3) {
           const { reviewSmartItem } = await import('@/lib/smart-send-service');
-          const input = z.object({ companyId: z.number().int().positive().optional(), confirm: z.boolean().optional(), excluded: z.boolean().optional(), remove: z.boolean().optional() }).strict().parse(await json(request));
+          const input = z.object({ companyId: z.number().int().positive().safe().optional(), confirm: z.boolean().optional(), excluded: z.boolean().optional(), remove: z.boolean().optional(),
+            expectedRevision: z.number().int().nonnegative().safe().optional(), expectedRecipient: z.string().max(254).optional() }).strict().parse(await json(request));
           await reviewSmartItem(owner, id, itemId, input); return response({ ok: true });
         }
         if (method === 'POST' && path.length === 4 && path[3] === 'resolve') {
