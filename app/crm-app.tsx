@@ -96,7 +96,7 @@ export function CrmApp() {
     [menuOpen, setMenuOpen] = useState(false),
     [metrics, setMetrics] = useState<Metrics | null>(null),
     [refreshKey, setRefreshKey] = useState(0),
-    [loading, setLoading] = useState(true),
+    [dashboardError, setDashboardError] = useState(false),
     [dialogOpen, setDialogOpen] = useState(false),
     [selectedCompany, setSelectedCompany] = useState<number | null>(null);
   useEffect(() => {
@@ -142,21 +142,22 @@ export function CrmApp() {
   useEffect(() => {
     if (view !== "dashboard") return;
     const controller = new AbortController();
-    const timer = setTimeout(async () => {
-      setLoading(true);
+    async function loadDashboard() {
       try {
         const response = await fetch("/api/dashboard", { signal: controller.signal });
         if (!response.ok) throw new Error();
         const nextMetrics = await response.json() as Metrics;
-        if (!controller.signal.aborted) setMetrics(nextMetrics);
+        // Cleanup invalidates this request even if fetch has already resolved.
+        if (!controller.signal.aborted) {
+          setMetrics(nextMetrics);
+          setDashboardError(false);
+        }
       } catch {
-        if (!controller.signal.aborted) toast.error("Não foi possível carregar os dados agora.");
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted) setDashboardError(true);
       }
-    }, 250);
+    }
+    void loadDashboard();
     return () => {
-      clearTimeout(timer);
       controller.abort();
     };
   }, [view, refreshKey]);
@@ -275,7 +276,7 @@ export function CrmApp() {
           {view === "dashboard" ? (
             <Dashboard
               metrics={metrics}
-              loading={loading}
+              error={dashboardError}
               onAdd={() => setDialogOpen(true)}
               onCompanies={() => setView("companies")}
             />
@@ -312,15 +313,16 @@ export function CrmApp() {
 
 function Dashboard({
   metrics,
-  loading,
+  error,
   onAdd,
   onCompanies,
 }: {
   metrics: Metrics | null;
-  loading: boolean;
+  error: boolean;
   onAdd: () => void;
   onCompanies: () => void;
 }) {
+  const loading = metrics === null && !error;
   const cards = [
     {
       label: "Total de empresas",
@@ -353,7 +355,13 @@ function Dashboard({
         <div>
           <p className="eyebrow">PAINEL COMERCIAL</p>
           <h1>Bom dia, Marco</h1>
-          <p>Acompanhe sua prospecção e veja o que precisa de atenção.</p>
+          <p role={error ? "status" : undefined}>
+            {error
+              ? metrics
+                ? "Não foi possível atualizar agora. Exibindo os últimos dados disponíveis."
+                : "Não foi possível carregar os dados agora."
+              : "Acompanhe sua prospecção e veja o que precisa de atenção."}
+          </p>
         </div>
         <div className="intro-actions">
           <Button variant="outline" onClick={onCompanies}>
@@ -376,7 +384,7 @@ function Dashboard({
               {loading ? (
                 <Skeleton className="mt-2 h-8 w-14" />
               ) : (
-                <strong>{value ?? 0}</strong>
+                <strong>{value ?? "—"}</strong>
               )}
             </div>
           </article>
@@ -396,15 +404,15 @@ function Dashboard({
           <div className="performance-row">
             <div>
               <span>Enviados hoje</span>
-              <strong>{metrics?.sentToday ?? 0}</strong>
+              <strong>{metrics?.sentToday ?? "—"}</strong>
             </div>
             <div>
               <span>Enviados no período</span>
-              <strong>{metrics?.sentWeek ?? 0}</strong>
+              <strong>{metrics?.sentWeek ?? "—"}</strong>
             </div>
             <div>
               <span>Taxa de resposta</span>
-              <strong>{metrics?.responseRate ?? 0}%</strong>
+              <strong>{metrics ? `${metrics.responseRate}%` : "—"}</strong>
             </div>
           </div>
           <div className="quiet-chart">
@@ -444,8 +452,10 @@ function Dashboard({
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : metrics ? (
             <EmptyActivity onAdd={onAdd} />
+          ) : (
+            <p role="status">Atividades indisponíveis no momento.</p>
           )}
         </article>
       </section>
