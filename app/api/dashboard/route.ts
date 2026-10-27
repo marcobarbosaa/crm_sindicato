@@ -5,16 +5,32 @@ import { getDb } from "@/db";
 import { activityLogs, companies, crmSettings, emailMessages, followUps } from "@/db/schema";
 
 export async function GET() {
+  const startedAt = performance.now();
+  const timings: string[] = [];
+  // Elapsed operation time includes connection waits and database communication.
+  async function measure<T>(name: string, operation: () => PromiseLike<T>): Promise<T> {
+    const start = performance.now();
+    try {
+      return await operation();
+    } finally {
+      timings.push(`${name};dur=${(performance.now() - start).toFixed(2)}`);
+    }
+  }
+  const dbStartedAt = performance.now();
   const db = getDb(); const owner = "local-preview-user";
-  const [settings] = await db.select().from(crmSettings).where(eq(crmSettings.ownerId, owner)).limit(1);
+  timings.push(`get_db;dur=${(performance.now() - dbStartedAt).toFixed(2)}`);
+  const [settings] = await measure("settings", () => db.select().from(crmSettings).where(eq(crmSettings.ownerId, owner)).limit(1));
   const {start:startToday} = sendingDayWindow(settings?.timezone); const endToday=new Date(sendingDayWindow().next.getTime()-1); const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
   const [companyCounts, todayEmails, weekEmails, dueFollowUps, activities] = await Promise.all([
-    db.select({ status: companies.status, total: sql<number>`count(*)` }).from(companies).where(eq(companies.ownerId, owner)).groupBy(companies.status),
-    db.select({ total: sql<number>`count(*)` }).from(emailMessages).where(and(eq(emailMessages.ownerId, owner), gte(emailMessages.sentAt, sql`${startToday.getTime()}`))),
-    db.select({ total: sql<number>`count(*)` }).from(emailMessages).where(and(eq(emailMessages.ownerId, owner), gte(emailMessages.sentAt, sql`${sevenDaysAgo.getTime()}`))),
-    db.select({ total: sql<number>`count(*)` }).from(followUps).where(and(eq(followUps.ownerId, owner), eq(followUps.status, "PENDING"),lte(followUps.dueAt,sql`${endToday.getTime()}`))),
-    db.select().from(activityLogs).where(eq(activityLogs.ownerId, owner)).orderBy(desc(activityLogs.createdAt)).limit(8),
+    measure("companies", () => db.select({ status: companies.status, total: sql<number>`count(*)` }).from(companies).where(eq(companies.ownerId, owner)).groupBy(companies.status)),
+    measure("sent_today", () => db.select({ total: sql<number>`count(*)` }).from(emailMessages).where(and(eq(emailMessages.ownerId, owner), gte(emailMessages.sentAt, sql`${startToday.getTime()}`)))),
+    measure("sent_week", () => db.select({ total: sql<number>`count(*)` }).from(emailMessages).where(and(eq(emailMessages.ownerId, owner), gte(emailMessages.sentAt, sql`${sevenDaysAgo.getTime()}`)))),
+    measure("followups", () => db.select({ total: sql<number>`count(*)` }).from(followUps).where(and(eq(followUps.ownerId, owner), eq(followUps.status, "PENDING"),lte(followUps.dueAt,sql`${endToday.getTime()}`)))),
+    measure("activities", () => db.select().from(activityLogs).where(eq(activityLogs.ownerId, owner)).orderBy(desc(activityLogs.createdAt)).limit(8)),
   ]);
   const counts = Object.fromEntries(companyCounts.map((row) => [row.status, Number(row.total)])); const total = Object.values(counts).reduce((sum, value) => sum + value, 0); const replied = (counts.REPLIED || 0) + (counts.INTERESTED || 0) + (counts.NOT_INTERESTED || 0);
-  return NextResponse.json({ total, notContacted: counts.NOT_CONTACTED || 0, contacted: total - (counts.NOT_CONTACTED || 0), replied, followUps: Number(dueFollowUps[0]?.total || 0), sentToday: Number(todayEmails[0]?.total || 0), sentWeek: Number(weekEmails[0]?.total || 0), responseRate: total ? Math.round((replied / total) * 100) : 0, activities });
+  const response = NextResponse.json({ total, notContacted: counts.NOT_CONTACTED || 0, contacted: total - (counts.NOT_CONTACTED || 0), replied, followUps: Number(dueFollowUps[0]?.total || 0), sentToday: Number(todayEmails[0]?.total || 0), sentWeek: Number(weekEmails[0]?.total || 0), responseRate: total ? Math.round((replied / total) * 100) : 0, activities });
+  timings.push(`total;dur=${(performance.now() - startedAt).toFixed(2)}`);
+  response.headers.set("Server-Timing", timings.join(", "));
+  return response;
 }
