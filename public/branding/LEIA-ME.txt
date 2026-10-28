@@ -1,0 +1,8 @@
+CONECTA CORE | IDENTIDADE V1 - MATERIAL DE APROVACAO
+
+Direcao aprovada: proposta 01, simbolo geometrico de conexoes + wordmark conecta core.
+Paleta de referencia: azul-petroleo #153E47, teal #168B83, grafite #202C32, gelo #F4F7F7.
+Slogan: Tudo conectado. Tudo sob controle.
+
+ATENCAO: Estes PNGs sao recortes do estudo visual gerado. Sao REFERENCIAS e nao arquivos vetoriais, nem logotipo mestre pronto para producao. Alguns recortes contem fundo claro ou bordas do mockup. Antes da implementacao, reconstruir fielmente o simbolo em SVG, ajustar kerning e fornecer versoes transparentes, monocromatica e invertida, aprovadas visualmente.
+Nao foram realizadas alteracoes no CRM, Supabase, dominio ou backend.

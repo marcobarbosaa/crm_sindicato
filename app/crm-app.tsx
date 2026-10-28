@@ -1,6 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import "./workspace-branding.css";
 import {
   Activity,
   Building2,
@@ -223,12 +224,17 @@ export function CrmApp() {
     <div className="app-shell">
       <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
         <div className="brand">
-          <div className="brand-mark">
-            <Mail />
-          </div>
-          <div>
-            <strong>Prospecta</strong>
-            <span>CRM de e-mails</span>
+          <div className="conecta-brand-copy">
+            {/* Official SVG: serve the supplied artwork unchanged. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/branding/conecta-core-logo-escuro.svg"
+              alt="Conecta Core"
+              width={760}
+              height={250}
+              className="conecta-brand-logo"
+            />
+            <p className="conecta-brand-slogan">Tudo conectado. Tudo sob controle.</p>
           </div>
           <button
             className="mobile-close"
@@ -290,8 +296,10 @@ export function CrmApp() {
             onClick={() => setMenuOpen(true)}
             aria-label="Abrir menu"
           >
-            <Menu />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/branding/conecta-core-simbolo.svg" alt="" width={24} height={24} />
             <span>Menu</span>
+            <Menu />
           </button>
           <Suspense fallback={<SectionLoading view={view} />}>
             {view === "dashboard" ? (

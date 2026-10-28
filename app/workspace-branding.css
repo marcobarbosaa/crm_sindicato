@@ -1,0 +1,97 @@
+/* Brand identity only: keep page content and the landing page unchanged. */
+.app-shell > .sidebar {
+  background: #153e47;
+  color: #f4f7f7;
+  overflow-y: auto;
+}
+
+.app-shell > .sidebar > * {
+  flex-shrink: 0;
+}
+
+.app-shell > .sidebar .brand {
+  align-items: flex-start;
+}
+
+.app-shell .conecta-brand-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.app-shell .conecta-brand-logo {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.app-shell .conecta-brand-slogan {
+  margin: 9px 0 0;
+  color: #f4f7f7;
+  font-family: Manrope, Inter, Arial, sans-serif;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.app-shell > .sidebar nav button {
+  color: #f4f7f7;
+}
+
+.app-shell > .sidebar nav button:hover {
+  background: #202c32;
+}
+
+.app-shell > .sidebar nav button.active {
+  background: #202c32;
+  box-shadow: inset 3px 0 #168b83;
+}
+
+.app-shell > .sidebar .sidebar-help {
+  background: #202c32;
+  border-color: #f4f7f733;
+}
+
+.app-shell > .sidebar .sidebar-help svg,
+.app-shell > .sidebar .sidebar-help span,
+.app-shell > .sidebar .profile span,
+.app-shell > .sidebar .profile > svg,
+.app-shell > .sidebar .mobile-close {
+  color: #f4f7f7;
+}
+
+.app-shell > .sidebar .profile {
+  border-color: #f4f7f733;
+}
+
+.app-shell > .sidebar .avatar {
+  background: #202c32;
+}
+
+.app-shell > .sidebar .crm-sidebar-create > button {
+  background: #168b83;
+  color: #fff;
+}
+
+.app-shell > .sidebar .crm-sidebar-create > button:hover {
+  background: #202c32;
+}
+
+.app-shell > .sidebar button:focus-visible,
+.app-shell .crm-mobile-menu:focus-visible {
+  outline: 2px solid #f4f7f7;
+  outline-offset: 3px;
+}
+
+.app-shell .crm-mobile-menu {
+  color: #153e47;
+  border-color: #153e4733;
+  background: #f4f7f7;
+}
+
+.app-shell .crm-mobile-menu:focus-visible {
+  outline-color: #168b83;
+}
+
+.app-shell > .sidebar .mobile-close {
+  flex: none;
+  margin-top: 8px;
+}
