@@ -1,0 +1,55 @@
+-- pg-delta: transaction=false
+-- Pagination index only. Do not wrap this file in BEGIN/COMMIT or psql -1.
+-- Current Supabase CLI supports standalone CREATE INDEX CONCURRENTLY;
+-- Supabase GitHub/Branching migrations enforce a transaction and cannot run it.
+-- This repository does not pin/configure a production migration runner.
+-- Use the manual procedure below if its transaction behavior is unverified.
+-- References:
+-- https://supabase.com/docs/guides/local-development/cli-workflows
+-- https://supabase.com/docs/guides/deployment/branching/github-integration
+-- https://www.postgresql.org/docs/current/sql-createindex.html
+--
+-- MANUAL APPLICATION (after review; not executed as part of this change):
+-- 1. Use a direct PostgreSQL connection or session pooler with DDL privileges.
+--    Set standard PGHOST/PGPORT/PGDATABASE/PGUSER and use a protected pgpass file.
+--    Confirm the intended database with SELECT current_database(), current_user.
+--    Coordinate with any automated runner so it does not apply this file in a
+--    transaction before the manual application and history registration finish.
+-- 2. Before AND after applying, inspect the exact name, definition and validity:
+--    SELECT c.relname, i.indisvalid, i.indisready, pg_get_indexdef(i.indexrelid)
+--    FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+--    WHERE i.indexrelid = to_regclass('public.idx_companies_owner_created_id');
+--    Before: no row is expected. If present, verify it is the same non-unique
+--    B-tree on public.companies (owner_id, created_at DESC, id DESC), with both
+--    flags true. IF NOT EXISTS checks the name only; it does not repair an
+--    invalid or differently defined index. Stop for review if either differs.
+-- 3. From the repository root, run ONLY this file in a new autocommit session:
+--    psql -X -v ON_ERROR_STOP=1 -v AUTOCOMMIT=on -f supabase/migrations/20261028140801_companies_owner_created_id.sql
+--    Do not use --single-transaction, a transaction wrapper, or a multi-command
+--    SQL batch. Concurrent builds allow writes but consume I/O and can wait
+--    for existing transactions. Schedule and monitor accordingly.
+-- 4. Recheck definition and indisvalid/indisready. If creation fails, an invalid
+--    index may remain. Do not mark applied or blindly retry: request a separate
+--    recovery review. This migration never drops or rebuilds existing indexes.
+-- 5. Only after successful verification, if Supabase migration history is used,
+--    mark ONLY this version applied against the explicitly verified target:
+--    supabase migration repair 20261028140801 --status applied --db-url <TARGET_URL>
+--    Supply the URL securely. This records history; it does not create the index.
+--    Do not run db push/migration up to apply unrelated pending migrations.
+--
+-- PLAN VALIDATION (run separately before and after, never as part of this file):
+-- Use the same real owner_id, application database role/RLS context and data.
+-- EXPLAIN (ANALYZE, BUFFERS)
+-- SELECT * FROM public.companies
+-- WHERE owner_id = '<OWNER_ID>'
+-- ORDER BY created_at DESC, id DESC
+-- LIMIT 50 OFFSET 0;
+-- Expect Limit -> Index Scan using idx_companies_owner_created_id, with an
+-- Index Cond on owner_id and no separate Sort. Compare actual execution time,
+-- rows and shared buffer hits/reads across repeated runs with comparable cache
+-- conditions. Do not force enable_seqscan off. The planner may prefer a scan
+-- for small tables; inspect statistics and selectivity if the plan is unchanged.
+-- OFFSET for deeper pages remains unchanged and still requires skipping rows.
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_companies_owner_created_id
+  ON public.companies USING btree (owner_id, created_at DESC, id DESC);
