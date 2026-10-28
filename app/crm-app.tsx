@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import {
   Activity,
   Building2,
@@ -43,17 +43,37 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast, Toaster } from "sonner";
-import { CompaniesPage } from "./companies-page";
 import { CompanyDetail } from "./company-detail";
-import { ImportPage } from "./import-page";
-import { TemplatesPage } from "./templates-page";
-import { EmailsPage } from "./emails-page";
-import { BatchEmailsPage } from "./batch-emails-page";
-import { SmartSendsPage } from "./smart-sends-page";
-import { FollowUpsPage } from "./followups-page";
-import { ContactsPage } from "./contacts-page";
-import { SettingsPage } from "./settings-page";
 import { parseWorkforce } from "@/lib/company-size";
+
+// Keep loaders at module scope so navigation reuses the resolved modules.
+const CompaniesPage = lazy(() =>
+  import("./companies-page").then((module) => ({ default: module.CompaniesPage })),
+);
+const ImportPage = lazy(() =>
+  import("./import-page").then((module) => ({ default: module.ImportPage })),
+);
+const TemplatesPage = lazy(() =>
+  import("./templates-page").then((module) => ({ default: module.TemplatesPage })),
+);
+const EmailsPage = lazy(() =>
+  import("./emails-page").then((module) => ({ default: module.EmailsPage })),
+);
+const BatchEmailsPage = lazy(() =>
+  import("./batch-emails-page").then((module) => ({ default: module.BatchEmailsPage })),
+);
+const SmartSendsPage = lazy(() =>
+  import("./smart-sends-page").then((module) => ({ default: module.SmartSendsPage })),
+);
+const FollowUpsPage = lazy(() =>
+  import("./followups-page").then((module) => ({ default: module.FollowUpsPage })),
+);
+const ContactsPage = lazy(() =>
+  import("./contacts-page").then((module) => ({ default: module.ContactsPage })),
+);
+const SettingsPage = lazy(() =>
+  import("./settings-page").then((module) => ({ default: module.SettingsPage })),
+);
 
 type Metrics = {
   total: number;
@@ -273,32 +293,34 @@ export function CrmApp() {
             <Menu />
             <span>Menu</span>
           </button>
-          {view === "dashboard" ? (
-            <Dashboard
-              metrics={metrics}
-              error={dashboardError}
-              onAdd={() => setDialogOpen(true)}
-              onCompanies={() => setView("companies")}
-            />
-          ) : view === "companies" ? (
-            <CompaniesPage
-              refreshKey={refreshKey}
-              onAdd={() => setDialogOpen(true)}
-              onOpen={setSelectedCompany}
-              onImport={() => setView("imports")}
-              onRemove={removeCompany}
-            />
-          ) : view === "imports" ? (
-            <ImportPage onImported={refreshCompanies} />
-          ) : view === "templates" ? (
-            <TemplatesPage onDirtyChange={setTemplateDirty} />
-          ) : view === "settings" ? (
-            <SettingsPage navigate={navigate} onDirtyChange={setSettingsDirty} />
-          ) : view === "emails" ? (
-            <EmailsPage />
-          ) : (
-            <ComingSoon view={view} onCompanies={() => setView("companies")} />
-          )}
+          <Suspense fallback={<SectionLoading view={view} />}>
+            {view === "dashboard" ? (
+              <Dashboard
+                metrics={metrics}
+                error={dashboardError}
+                onAdd={() => setDialogOpen(true)}
+                onCompanies={() => setView("companies")}
+              />
+            ) : view === "companies" ? (
+              <CompaniesPage
+                refreshKey={refreshKey}
+                onAdd={() => setDialogOpen(true)}
+                onOpen={setSelectedCompany}
+                onImport={() => setView("imports")}
+                onRemove={removeCompany}
+              />
+            ) : view === "imports" ? (
+              <ImportPage onImported={refreshCompanies} />
+            ) : view === "templates" ? (
+              <TemplatesPage onDirtyChange={setTemplateDirty} />
+            ) : view === "settings" ? (
+              <SettingsPage navigate={navigate} onDirtyChange={setSettingsDirty} />
+            ) : view === "emails" ? (
+              <EmailsPage />
+            ) : (
+              <ComingSoon view={view} onCompanies={() => setView("companies")} />
+            )}
+          </Suspense>
         </div>
       </main>
       <CompanyDetail
@@ -308,6 +330,17 @@ export function CrmApp() {
       />
       <Toaster richColors position="bottom-right" />
     </div>
+  );
+}
+
+function SectionLoading({ view }: { view: View }) {
+  return (
+    <section className="page-intro compact" role="status" aria-live="polite">
+      <div>
+        <h1>{nav.find(([id]) => id === view)?.[1]}</h1>
+        <p>Carregando seção...</p>
+      </div>
+    </section>
   );
 }
 
