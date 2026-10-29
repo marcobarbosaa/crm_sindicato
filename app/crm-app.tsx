@@ -1,6 +1,6 @@
 "use client";
 
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import "./workspace-branding.css";
 import {
   Activity,
@@ -111,6 +111,8 @@ const nav = [
   ["settings", "Configurações", Settings],
 ] as const;
 export function CrmApp() {
+  const sidebarRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const [templateDirty, setTemplateDirty] = useState(false);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [view, setView] = useState<View>("dashboard"),
@@ -120,6 +122,45 @@ export function CrmApp() {
     [dashboardError, setDashboardError] = useState(false),
     [dialogOpen, setDialogOpen] = useState(false),
     [selectedCompany, setSelectedCompany] = useState<number | null>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const menuButton = menuButtonRef.current;
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const closeOnDesktop = () => { if (desktop.matches) setMenuOpen(false); };
+    closeOnDesktop();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() => {
+      sidebarRef.current?.querySelector<HTMLButtonElement>(".mobile-close")?.focus();
+    });
+    const keyboard = (event: KeyboardEvent) => {
+      // Portaled dialogs retain their own keyboard and focus handling.
+      if (document.querySelector('[role="dialog"]')) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenuOpen(false);
+      }
+      if (event.key !== "Tab") return;
+      const items = Array.from(sidebarRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [tabindex="0"]',
+      ) ?? []).filter((element) => element.getClientRects().length > 0);
+      const first = items[0], last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first?.focus();
+      }
+    };
+    document.addEventListener("keydown", keyboard);
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", keyboard);
+      desktop.removeEventListener("change", closeOnDesktop);
+      if (!desktop.matches) menuButton?.focus();
+    };
+  }, [menuOpen]);
   useEffect(() => {
     const show = () =>
         toast.info(
@@ -222,19 +263,19 @@ export function CrmApp() {
   }, [view, settingsDirty]);
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
+      <aside ref={sidebarRef} id="workspace-navigation" className={`sidebar ${menuOpen ? "open" : ""}`}>
         <div className="brand">
           <div className="conecta-brand-copy">
-            {/* Official SVG: serve the supplied artwork unchanged. */}
+            {/* Official symbol: serve the supplied artwork unchanged. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/branding/conecta-core-logo-escuro.svg"
-              alt="Conecta Core"
-              width={760}
-              height={250}
+              src="/branding/conecta-core-simbolo.svg"
+              alt=""
+              width={44}
+              height={44}
               className="conecta-brand-logo"
             />
-            <p className="conecta-brand-slogan">Tudo conectado. Tudo sob controle.</p>
+            <strong className="conecta-brand-name">conecta <span>core</span></strong>
           </div>
           <button
             className="mobile-close"
@@ -249,6 +290,7 @@ export function CrmApp() {
             <button
               key={id}
               className={view === id ? "active" : ""}
+              aria-current={view === id ? "page" : undefined}
               onClick={() => navigate(id)}
             >
               <Icon />
@@ -289,12 +331,15 @@ export function CrmApp() {
           aria-label="Fechar menu"
         />
       )}
-      <main>
+      <main inert={menuOpen}>
         <div className="content">
           <button
             className="menu-button crm-mobile-menu"
+            ref={menuButtonRef}
             onClick={() => setMenuOpen(true)}
             aria-label="Abrir menu"
+            aria-expanded={menuOpen}
+            aria-controls="workspace-navigation"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/branding/conecta-core-simbolo.svg" alt="" width={24} height={24} />

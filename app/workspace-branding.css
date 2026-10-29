@@ -1,97 +1,111 @@
-/* Brand identity only: keep page content and the landing page unchanged. */
+﻿/* Scoped shell styles override legacy Prospecta rules without changing section content. */
+.app-shell {
+  --workspace-sidebar-width: 272px;
+  --workspace-teal: #32b9bd;
+  display: grid;
+  grid-template-columns: var(--workspace-sidebar-width) minmax(0, 1fr);
+  min-height: 100dvh;
+  background: #f5f7f9;
+}
+.app-shell > main { min-width: 0; grid-column: 2; }
+.app-shell > main > .content { width: 100%; padding: 32px; }
 .app-shell > .sidebar {
-  background: #153e47;
-  color: #f4f7f7;
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: var(--workspace-sidebar-width);
+  height: 100dvh;
+  padding: 30px 16px 20px;
+  background: #082632;
+  color: #f4f9fa;
+  border-right: 1px solid #173743;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #31525c #082632;
 }
-
-.app-shell > .sidebar > * {
-  flex-shrink: 0;
-}
-
-.app-shell > .sidebar .brand {
-  align-items: flex-start;
-}
-
-.app-shell .conecta-brand-copy {
-  min-width: 0;
-  flex: 1;
-}
-
-.app-shell .conecta-brand-logo {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.app-shell .conecta-brand-slogan {
-  margin: 9px 0 0;
-  color: #f4f7f7;
+.app-shell > .sidebar > * { flex-shrink: 0; }
+.app-shell > .sidebar .brand { align-items: center; gap: 8px; padding: 0 10px 32px; }
+.app-shell .conecta-brand-copy { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.app-shell .conecta-brand-logo { display: block; flex: none; width: 44px; height: 44px; }
+.app-shell .brand .conecta-brand-name {
+  color: #f8fcfc;
   font-family: Manrope, Inter, Arial, sans-serif;
-  font-size: 10px;
-  line-height: 1.5;
+  font-size: 27px;
+  font-weight: 750;
+  line-height: .98;
+  letter-spacing: -1px;
 }
-
+.app-shell .brand .conecta-brand-name span { margin: 0; color: var(--workspace-teal); font-size: inherit; line-height: inherit; }
+.app-shell > .sidebar nav { gap: 5px; }
 .app-shell > .sidebar nav button {
-  color: #f4f7f7;
+  position: relative;
+  gap: 14px;
+  min-height: 46px;
+  height: auto;
+  padding: 12px 14px;
+  border-radius: 8px;
+  color: #bfd0d8;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  transition: background-color 160ms ease, color 160ms ease;
 }
-
-.app-shell > .sidebar nav button:hover {
-  background: #202c32;
+.app-shell > .sidebar nav button svg { flex: none; width: 20px; height: 20px; stroke-width: 1.7; }
+.app-shell > .sidebar nav button:hover { background: #123441; color: #fff; }
+.app-shell > .sidebar nav button.active { background: #1c3b47; color: #fff; box-shadow: none; }
+.app-shell > .sidebar nav button.active::before {
+  content: "";
+  position: absolute;
+  inset: 9px auto 9px 0;
+  width: 4px;
+  border-radius: 0 4px 4px 0;
+  background: var(--workspace-teal);
 }
-
-.app-shell > .sidebar nav button.active {
-  background: #202c32;
-  box-shadow: inset 3px 0 #168b83;
-}
-
+.app-shell > .sidebar nav button:last-child { margin-top: 14px; }
+.app-shell > .sidebar nav button:last-child::after { content: ""; position: absolute; inset: -10px 12px auto; height: 1px; background: #ffffff1a; }
+.app-shell > .sidebar nav em { background: #24525b; color: #b8f2ed; }
+.app-shell > .sidebar .crm-sidebar-create { padding: 20px 0; }
+.app-shell > .sidebar .crm-sidebar-create > button { min-height: 42px; background: #168b83; color: #fff; border-radius: 8px; }
+.app-shell > .sidebar .crm-sidebar-create > button:hover { background: #11796f; }
 .app-shell > .sidebar .sidebar-help {
-  background: #202c32;
-  border-color: #f4f7f733;
+  align-items: center;
+  gap: 12px;
+  margin-top: auto;
+  padding: 14px 12px;
+  border: 1px solid #ffffff0d;
+  background: #12323f;
+  border-radius: 10px;
+  transition: background-color 160ms ease;
 }
-
-.app-shell > .sidebar .sidebar-help svg,
+.app-shell > .sidebar .sidebar-help:hover { background: #1c3b47; }
+.app-shell > .sidebar .sidebar-help svg { flex: none; width: 20px; color: var(--workspace-teal); }
 .app-shell > .sidebar .sidebar-help span,
-.app-shell > .sidebar .profile span,
-.app-shell > .sidebar .profile > svg,
-.app-shell > .sidebar .mobile-close {
-  color: #f4f7f7;
-}
-
-.app-shell > .sidebar .profile {
-  border-color: #f4f7f733;
-}
-
-.app-shell > .sidebar .avatar {
-  background: #202c32;
-}
-
-.app-shell > .sidebar .crm-sidebar-create > button {
-  background: #168b83;
-  color: #fff;
-}
-
-.app-shell > .sidebar .crm-sidebar-create > button:hover {
-  background: #202c32;
-}
-
+.app-shell > .sidebar .profile span { color: #a7bec9; line-height: 1.5; }
+.app-shell > .sidebar .profile { grid-template-columns: 38px minmax(0, 1fr) 18px; gap: 11px; margin-top: 18px; padding: 18px 8px 0; border-color: #ffffff1a; }
+.app-shell > .sidebar .profile strong { font-size: 13px; }
+.app-shell > .sidebar .profile > svg { color: #a7bec9; }
+.app-shell > .sidebar .avatar { width: 38px; height: 38px; background: #176071; color: #fff; border: 1px solid #ffffff1a; }
 .app-shell > .sidebar button:focus-visible,
-.app-shell .crm-mobile-menu:focus-visible {
-  outline: 2px solid #f4f7f7;
-  outline-offset: 3px;
+.app-shell > .sidebar .sidebar-help:focus-visible,
+.app-shell .crm-mobile-menu:focus-visible { outline: 2px solid var(--workspace-teal); outline-offset: 3px; }
+.app-shell .crm-mobile-menu { display: none; min-height: 44px; color: #153e47; border-color: #d9e3e7; background: #fff; border-radius: 8px; }
+.app-shell > .sidebar .mobile-close { display: none; flex: none; width: 44px; height: 44px; margin: 0 0 0 auto; border-radius: 8px; color: #bfd0d8; }
+@media (max-width: 1023px) {
+  .app-shell { display: block; }
+  .app-shell > main > .content { padding: 24px; }
+  .app-shell > .sidebar { width: min(304px, calc(100vw - 32px)); visibility: hidden; transform: translateX(-100%); transition: transform 200ms ease; }
+  .app-shell > .sidebar.open { visibility: visible; transform: none; }
+  .app-shell > .sidebar .brand { padding-inline: 4px; }
+  .app-shell > .sidebar .mobile-close { display: grid; place-items: center; }
+  .app-shell .crm-mobile-menu { display: inline-flex; align-items: center; }
+  .app-shell > .overlay { display: block; position: fixed; inset: 0; z-index: 30; border: 0; background: #04182199; }
 }
-
-.app-shell .crm-mobile-menu {
-  color: #153e47;
-  border-color: #153e4733;
-  background: #f4f7f7;
+@media (max-width: 480px) {
+  .app-shell > main > .content { padding: 20px 16px; }
 }
-
-.app-shell .crm-mobile-menu:focus-visible {
-  outline-color: #168b83;
-}
-
-.app-shell > .sidebar .mobile-close {
-  flex: none;
-  margin-top: 8px;
+@media (prefers-reduced-motion: reduce) {
+  .app-shell > .sidebar,
+  .app-shell > .sidebar nav button,
+  .app-shell > .sidebar .sidebar-help { transition: none; }
 }
