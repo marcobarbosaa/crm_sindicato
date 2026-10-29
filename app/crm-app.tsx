@@ -2,11 +2,11 @@
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import "./workspace-branding.css";
+import "./dashboard.css";
 import {
   Activity,
   Building2,
   CalendarClock,
-  ChevronDown,
   CircleHelp,
   ContactRound,
   FileUp,
@@ -19,7 +19,6 @@ import {
   Send,
   Settings,
   Sparkles,
-  Users,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -41,7 +40,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast, Toaster } from "sonner";
 import { CompanyDetail } from "./company-detail";
@@ -409,157 +407,172 @@ function Dashboard({
   onCompanies: () => void;
 }) {
   const loading = metrics === null && !error;
+  const showFirstCompany = metrics?.total === 0 && !error;
+  const formatNumber = (value: number | undefined) => value?.toLocaleString("pt-BR");
   const cards = [
     {
-      label: "Total de empresas",
+      label: "Empresas",
       value: metrics?.total,
       Icon: Building2,
-      tone: "blue",
     },
     {
-      label: "Ainda não contatadas",
-      value: metrics?.notContacted,
-      Icon: Users,
-      tone: "slate",
-    },
-    {
-      label: "Responderam",
+      label: "Empresas que responderam",
       value: metrics?.replied,
+      Icon: ContactRound,
+    },
+    {
+      label: "E-mails enviados hoje",
+      value: metrics?.sentToday,
       Icon: Mail,
-      tone: "violet",
     },
     {
       label: "Follow-ups pendentes",
       value: metrics?.followUps,
       Icon: CalendarClock,
-      tone: "amber",
+    },
+  ];
+  const performance = [
+    {
+      label: "Enviados hoje",
+      description: "Envios registrados no dia",
+      value: formatNumber(metrics?.sentToday),
+      Icon: Mail,
+    },
+    {
+      label: "Enviados nos últimos 7 dias",
+      description: "Total de envios no período",
+      value: formatNumber(metrics?.sentWeek),
+      Icon: Send,
+    },
+    {
+      label: "Taxa de resposta",
+      description: "Empresas que responderam sobre o total",
+      value: metrics ? `${formatNumber(metrics.responseRate)}%` : undefined,
+      Icon: ContactRound,
     },
   ];
   return (
-    <>
-      <section className="page-intro">
+    <section className="conecta-dashboard" aria-labelledby="dashboard-title">
+      <header className="dashboard-intro">
         <div>
-          <p className="eyebrow">PAINEL COMERCIAL</p>
-          <h1>Bom dia, Marco</h1>
-          <p role={error ? "status" : undefined}>
-            {error
-              ? metrics
-                ? "Não foi possível atualizar agora. Exibindo os últimos dados disponíveis."
-                : "Não foi possível carregar os dados agora."
-              : "Acompanhe sua prospecção e veja o que precisa de atenção."}
-          </p>
+          <h1 id="dashboard-title">Visão geral</h1>
+          <p>Acompanhe empresas, comunicações e relacionamentos em um só lugar.</p>
         </div>
-        <div className="intro-actions">
-          <Button variant="outline" onClick={onCompanies}>
+        <div className="dashboard-actions">
+          <Button className="dashboard-secondary-action" variant="outline" onClick={onCompanies}>
             Ver empresas
           </Button>
-          <Button onClick={onAdd}>
-            <Plus />
+          <Button className="dashboard-primary-action" onClick={onAdd}>
+            <Plus aria-hidden="true" />
             Nova empresa
           </Button>
         </div>
-      </section>
-      <section className="metric-grid">
-        {cards.map(({ label, value, Icon, tone }) => (
-          <article className="metric-card" key={label}>
-            <div className={`metric-icon ${tone}`}>
-              <Icon />
+      </header>
+      {error && (
+        <p className="dashboard-notice" role="status">
+          {metrics
+            ? "Não foi possível atualizar agora. Exibindo os últimos dados disponíveis."
+            : "Não foi possível carregar os dados agora. Os indicadores estão indisponíveis."}
+        </p>
+      )}
+      {loading && <p className="sr-only" role="status">Carregando visão geral...</p>}
+      <section className="dashboard-metrics" aria-label="Indicadores gerais" aria-busy={loading}>
+        {cards.map(({ label, value, Icon }) => (
+          <article className="dashboard-metric" key={label}>
+            <div className="dashboard-metric-icon">
+              <Icon aria-hidden="true" />
             </div>
-            <div>
-              <span>{label}</span>
-              {loading ? (
-                <Skeleton className="mt-2 h-8 w-14" />
-              ) : (
-                <strong>{value ?? "—"}</strong>
-              )}
+            <div className="dashboard-metric-copy">
+              <h2>{label}</h2>
+              <DashboardValue loading={loading} value={formatNumber(value)} />
             </div>
           </article>
         ))}
       </section>
-      <section className="dashboard-grid">
-        <article className="panel performance">
-          <div className="panel-heading">
+      <div className="dashboard-panels">
+        <section className="dashboard-panel" aria-labelledby="dashboard-performance-title" aria-busy={loading}>
+          <header className="dashboard-panel-heading">
             <div>
-              <h2>Desempenho de e-mails</h2>
-              <p>Resumo dos últimos 7 dias</p>
+              <h2 id="dashboard-performance-title">Desempenho de e-mails</h2>
+              <p>Envios e relacionamento com sua base</p>
             </div>
-            <Badge variant="outline">
-              7 dias <ChevronDown />
-            </Badge>
-          </div>
-          <div className="performance-row">
+            <Mail aria-hidden="true" />
+          </header>
+          <dl className="dashboard-performance">
+            {performance.map(({ label, description, value, Icon }) => (
+              <div className="dashboard-performance-row" key={label}>
+                <dt>
+                  <span className="dashboard-performance-icon"><Icon aria-hidden="true" /></span>
+                  <span><span className="dashboard-performance-label">{label}</span><small>{description}</small></span>
+                </dt>
+                <dd><DashboardValue loading={loading} value={value} /></dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+        <section className="dashboard-panel" aria-labelledby="dashboard-activity-title" aria-busy={loading}>
+          <header className="dashboard-panel-heading">
             <div>
-              <span>Enviados hoje</span>
-              <strong>{metrics?.sentToday ?? "—"}</strong>
-            </div>
-            <div>
-              <span>Enviados no período</span>
-              <strong>{metrics?.sentWeek ?? "—"}</strong>
-            </div>
-            <div>
-              <span>Taxa de resposta</span>
-              <strong>{metrics ? `${metrics.responseRate}%` : "—"}</strong>
-            </div>
-          </div>
-          <div className="quiet-chart">
-            <div
-              style={{ height: `${Math.max(8, metrics?.responseRate ?? 0)}%` }}
-            />
-            <span>
-              Os indicadores aparecerão conforme os envios forem registrados.
-            </span>
-          </div>
-        </article>
-        <article className="panel activity-panel">
-          <div className="panel-heading">
-            <div>
-              <h2>Atividade recente</h2>
+              <h2 id="dashboard-activity-title">Atividades recentes</h2>
               <p>Últimas ações registradas</p>
             </div>
-            <Activity />
-          </div>
+            <Activity aria-hidden="true" />
+          </header>
           {loading ? (
-            <div className="skeleton-stack">
-              <Skeleton />
-              <Skeleton />
-              <Skeleton />
+            <div className="dashboard-activity-loading" aria-hidden="true">
+              {[0, 1, 2].map((item) => (
+                <div key={item}>
+                  <Skeleton className="dashboard-activity-line" />
+                  <Skeleton className="dashboard-activity-date" />
+                </div>
+              ))}
             </div>
           ) : metrics?.activities.length ? (
-            <ul className="activity-list">
+            <ul className="dashboard-activities">
               {metrics.activities.map((a) => (
                 <li key={a.id}>
-                  <span />
+                  <span className="dashboard-activity-dot" aria-hidden="true" />
                   <div>
-                    <strong>{a.description}</strong>
-                    <small>
-                      {new Date(a.createdAt).toLocaleString("pt-BR")}
-                    </small>
+                    <p>{a.description}</p>
+                    <time dateTime={new Date(a.createdAt).toISOString()}>
+                      {new Date(a.createdAt).toLocaleString("pt-BR", {
+                        day: "2-digit", month: "2-digit", year: "numeric",
+                        hour: "2-digit", minute: "2-digit",
+                      })}
+                    </time>
                   </div>
                 </li>
               ))}
             </ul>
           ) : metrics ? (
-            <EmptyActivity onAdd={onAdd} />
+            <EmptyActivity onAdd={showFirstCompany ? onAdd : undefined} />
           ) : (
-            <p role="status">Atividades indisponíveis no momento.</p>
+            <div className="dashboard-empty">
+              <History aria-hidden="true" />
+              <strong>Atividades indisponíveis</strong>
+              <p>Não foi possível carregar os registros no momento.</p>
+            </div>
           )}
-        </article>
-      </section>
-      <section className="quick-start">
-        <div className="quick-icon">
-          <Sparkles />
-        </div>
-        <div>
-          <h2>Comece sua prospecção</h2>
-          <p>
-            Cadastre sua primeira empresa. A importação por planilha entra na
-            próxima etapa.
-          </p>
-        </div>
-        <Button onClick={onAdd}>Cadastrar empresa</Button>
-      </section>
-    </>
+        </section>
+      </div>
+      {showFirstCompany && (
+        <section className="dashboard-first-company" aria-labelledby="dashboard-first-company-title">
+          <div className="dashboard-first-company-icon"><Building2 aria-hidden="true" /></div>
+          <div>
+            <h2 id="dashboard-first-company-title">Sua base começa com a primeira empresa</h2>
+            <p>Cadastre uma empresa para começar a organizar seus contatos e relacionamentos.</p>
+          </div>
+          <Button className="dashboard-primary-action" onClick={onAdd}>Cadastrar empresa</Button>
+        </section>
+      )}
+    </section>
   );
+}
+
+function DashboardValue({ loading, value }: { loading: boolean; value: string | undefined }) {
+  return loading
+    ? <Skeleton className="dashboard-value-skeleton" aria-hidden="true" />
+    : <strong className="dashboard-value" aria-label={value === undefined ? "Indisponível" : undefined}>{value ?? "—"}</strong>;
 }
 
 function CompanyDialog({
@@ -743,15 +756,13 @@ function Field({
     </div>
   );
 }
-function EmptyActivity({ onAdd }: { onAdd: () => void }) {
+function EmptyActivity({ onAdd }: { onAdd?: () => void }) {
   return (
-    <div className="empty-activity">
-      <div>
-        <History />
-      </div>
+    <div className="dashboard-empty">
+      <History aria-hidden="true" />
       <strong>Nenhuma atividade ainda</strong>
-      <span>As ações do CRM aparecerão aqui automaticamente.</span>
-      <button onClick={onAdd}>Cadastrar empresa</button>
+      <p>As ações do CRM aparecerão aqui automaticamente.</p>
+      {onAdd && <Button className="dashboard-secondary-action" variant="outline" onClick={onAdd}>Cadastrar empresa</Button>}
     </div>
   );
 }

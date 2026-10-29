@@ -1,0 +1,458 @@
+/* Dashboard only. Do not reuse legacy global panel/card selectors here. */
+.conecta-dashboard {
+  --dashboard-ink: #202c32;
+  --dashboard-petrol: #153e47;
+  --dashboard-teal: #168b83;
+  --dashboard-muted: #60757c;
+  --dashboard-border: #e1e9e9;
+  --dashboard-ice: #f4f7f7;
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+  color: var(--dashboard-ink);
+  font-family: Manrope, "Segoe UI", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.conecta-dashboard .dashboard-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 2px 0 4px;
+}
+
+.conecta-dashboard .dashboard-intro h1 {
+  margin: 0;
+  color: var(--dashboard-petrol);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -.04em;
+}
+
+.conecta-dashboard .dashboard-intro p {
+  max-width: 560px;
+  margin: 10px 0 0;
+  color: var(--dashboard-muted);
+  line-height: 1.65;
+}
+
+.conecta-dashboard .dashboard-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.conecta-dashboard .dashboard-primary-action,
+.conecta-dashboard .dashboard-secondary-action {
+  min-height: 42px;
+  height: auto;
+  padding: 10px 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: normal;
+  box-shadow: none;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.conecta-dashboard .dashboard-primary-action {
+  background: var(--dashboard-teal);
+  color: #fff;
+}
+
+.conecta-dashboard .dashboard-primary-action:hover {
+  background: #11766f;
+}
+
+.conecta-dashboard .dashboard-secondary-action {
+  border-color: #cedddd;
+  background: #fff;
+  color: var(--dashboard-petrol);
+}
+
+.conecta-dashboard .dashboard-secondary-action:hover {
+  border-color: #a6c6c5;
+  background: var(--dashboard-ice);
+}
+
+.conecta-dashboard button:focus-visible {
+  outline: 2px solid var(--dashboard-teal);
+  outline-offset: 3px;
+  box-shadow: none;
+}
+
+.conecta-dashboard .dashboard-notice {
+  margin: 0;
+  padding: 14px 18px;
+  border: 1px solid #e6d5ad;
+  border-radius: 10px;
+  background: #fffaf0;
+  color: #79581e;
+  font-size: 13px;
+}
+
+.conecta-dashboard .dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.conecta-dashboard .dashboard-metric,
+.conecta-dashboard .dashboard-panel {
+  min-width: 0;
+  border: 1px solid var(--dashboard-border);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 14px #153e4705;
+}
+
+.conecta-dashboard .dashboard-metric {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 18px;
+}
+
+.conecta-dashboard .dashboard-metric-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  background: #eaf6f4;
+  color: var(--dashboard-teal);
+}
+
+.conecta-dashboard .dashboard-metric:nth-child(2) .dashboard-metric-icon {
+  background: #eaf1f3;
+  color: var(--dashboard-petrol);
+}
+
+.conecta-dashboard .dashboard-metric:nth-child(4) .dashboard-metric-icon {
+  background: #f8f2e7;
+  color: #956c26;
+}
+
+.conecta-dashboard .dashboard-metric-icon svg {
+  width: 23px;
+  height: 23px;
+  stroke-width: 1.8;
+}
+
+.conecta-dashboard .dashboard-metric-copy {
+  min-width: 0;
+}
+
+.conecta-dashboard .dashboard-metric h2 {
+  min-height: 38px;
+  margin: 0 0 5px;
+  color: var(--dashboard-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 19px;
+}
+
+.conecta-dashboard .dashboard-value {
+  display: block;
+  color: var(--dashboard-ink);
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -.035em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.conecta-dashboard [data-slot="skeleton"] {
+  background: #e8efef;
+}
+
+.conecta-dashboard .dashboard-value-skeleton {
+  width: 68px;
+  max-width: 100%;
+  height: 36px;
+}
+
+.conecta-dashboard .dashboard-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 20px;
+}
+
+.conecta-dashboard .dashboard-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 92px;
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--dashboard-border);
+}
+
+.conecta-dashboard .dashboard-panel-heading h2 {
+  margin: 0;
+  color: var(--dashboard-petrol);
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -.02em;
+}
+
+.conecta-dashboard .dashboard-panel-heading p {
+  margin: 5px 0 0;
+  color: var(--dashboard-muted);
+  font-size: 12px;
+}
+
+.conecta-dashboard .dashboard-panel-heading > svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--dashboard-teal);
+  stroke-width: 1.7;
+}
+
+.conecta-dashboard .dashboard-performance {
+  margin: 0;
+  padding: 0 24px;
+}
+
+.conecta-dashboard .dashboard-performance-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(65px, auto);
+  align-items: center;
+  gap: 16px;
+  min-height: 96px;
+  padding: 20px 0;
+}
+
+.conecta-dashboard .dashboard-performance-row + .dashboard-performance-row {
+  border-top: 1px solid var(--dashboard-border);
+}
+
+.conecta-dashboard .dashboard-performance dt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.conecta-dashboard .dashboard-performance-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--dashboard-ice);
+  color: var(--dashboard-teal);
+}
+
+.conecta-dashboard .dashboard-performance-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.7;
+}
+
+.conecta-dashboard .dashboard-performance-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.conecta-dashboard .dashboard-performance small {
+  display: block;
+  margin-top: 5px;
+  color: var(--dashboard-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.conecta-dashboard .dashboard-performance dd {
+  margin: 0;
+  text-align: right;
+}
+
+.conecta-dashboard .dashboard-performance .dashboard-value {
+  font-size: 26px;
+}
+
+.conecta-dashboard .dashboard-activities {
+  min-height: 288px;
+  margin: 0;
+  padding: 0 24px;
+  list-style: none;
+}
+
+.conecta-dashboard .dashboard-activities li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 14px;
+  padding: 20px 0;
+}
+
+.conecta-dashboard .dashboard-activities li + li {
+  border-top: 1px solid var(--dashboard-border);
+}
+
+.conecta-dashboard .dashboard-activity-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--dashboard-teal);
+  box-shadow: 0 0 0 4px #eaf6f4;
+}
+
+.conecta-dashboard .dashboard-activities p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.conecta-dashboard .dashboard-activities time {
+  display: block;
+  margin-top: 6px;
+  color: var(--dashboard-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.conecta-dashboard .dashboard-activity-loading {
+  display: grid;
+  gap: 28px;
+  min-height: 288px;
+  padding: 24px;
+}
+
+.conecta-dashboard .dashboard-activity-line {
+  width: 90%;
+  height: 18px;
+}
+
+.conecta-dashboard .dashboard-activity-date {
+  width: 38%;
+  height: 12px;
+  margin-top: 12px;
+}
+
+.conecta-dashboard .dashboard-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 288px;
+  padding: 28px 24px;
+  text-align: center;
+}
+
+.conecta-dashboard .dashboard-empty > svg {
+  width: 46px;
+  height: 46px;
+  padding: 12px;
+  margin-bottom: 4px;
+  border-radius: 50%;
+  background: var(--dashboard-ice);
+  color: var(--dashboard-teal);
+}
+
+.conecta-dashboard .dashboard-empty strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.conecta-dashboard .dashboard-empty p {
+  max-width: 290px;
+  margin: 0;
+  color: var(--dashboard-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.conecta-dashboard .dashboard-empty button {
+  margin-top: 8px;
+}
+
+.conecta-dashboard .dashboard-first-company {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid #d6e7e4;
+  border-radius: 14px;
+  background: #eef6f4;
+}
+
+.conecta-dashboard .dashboard-first-company-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #d6e7e4;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--dashboard-teal);
+}
+
+.conecta-dashboard .dashboard-first-company-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.conecta-dashboard .dashboard-first-company h2 {
+  margin: 0;
+  color: var(--dashboard-petrol);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.conecta-dashboard .dashboard-first-company p {
+  margin: 6px 0 0;
+  color: var(--dashboard-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+@media (max-width: 1199px) {
+  .conecta-dashboard .dashboard-intro { align-items: flex-start; flex-direction: column; }
+  .conecta-dashboard .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .conecta-dashboard .dashboard-panels { grid-template-columns: minmax(0, 1fr); }
+  .conecta-dashboard .dashboard-metric h2 { min-height: 0; }
+}
+
+@media (max-width: 600px) {
+  .conecta-dashboard { gap: 18px; }
+  .conecta-dashboard .dashboard-intro { gap: 18px; }
+  .conecta-dashboard .dashboard-intro h1 { font-size: 28px; }
+  .conecta-dashboard .dashboard-intro p { font-size: 13px; }
+  .conecta-dashboard .dashboard-actions { width: 100%; }
+  .conecta-dashboard .dashboard-actions > button { flex: 1; }
+  .conecta-dashboard .dashboard-metrics { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .conecta-dashboard .dashboard-metric { padding: 18px; }
+  .conecta-dashboard .dashboard-panel-heading { padding: 20px 18px; }
+  .conecta-dashboard .dashboard-performance { padding: 0 18px; }
+  .conecta-dashboard .dashboard-performance-row { gap: 10px; }
+  .conecta-dashboard .dashboard-performance dt { gap: 10px; }
+  .conecta-dashboard .dashboard-performance-icon { width: 30px; height: 30px; }
+  .conecta-dashboard .dashboard-performance .dashboard-value { font-size: 24px; }
+  .conecta-dashboard .dashboard-activities { padding: 0 20px; }
+  .conecta-dashboard .dashboard-first-company { grid-template-columns: 40px minmax(0, 1fr); padding: 20px; gap: 14px; }
+  .conecta-dashboard .dashboard-first-company > button { grid-column: 1 / -1; width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conecta-dashboard button { transition: none; }
+  .conecta-dashboard [data-slot="skeleton"] { animation: none; }
+}
