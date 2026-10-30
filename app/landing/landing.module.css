@@ -320,3 +320,114 @@
   .landing *, .landing *::before, .landing *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   .primary:hover { transform: none; }
 }
+
+/* Stage 02: progressive enhancement; access scene and CRM remain independent. */
+.brandScene {
+  position: relative;
+  height: 300px;
+  width: 100%;
+  contain: layout;
+  background: radial-gradient(ellipse at 50% 55%, #288a8730, transparent 62%);
+}
+.sceneFallback, .sceneSurface { position: absolute; inset: 0; }
+.sceneSurface { pointer-events: none; opacity: 0; transition: opacity .5s ease; }
+.sceneSurface canvas { display: block; width: 100%; height: 100%; }
+.sceneFallback { transition: opacity .4s ease; }
+.brandScene[data-state="ready"] .sceneSurface { opacity: 1; }
+.brandScene[data-state="ready"] .sceneFallback { opacity: 0; }
+.heroVisual { padding-top: 0; }
+.heroPreview { transform: perspective(1400px) rotateY(-5deg) rotateX(2deg); }
+.heroGrid { padding-top: 36px; }
+.heroVisual .brandScene { margin-bottom: 10px; }
+.heroVisual .geometry { height: 100%; }
+.motionSurface { position: relative; min-width: 0; perspective: 1400px; }
+.motionSurface .preview {
+  box-shadow: 0 3px 6px #08263208, 0 16px 30px -15px #08263230, 0 40px 75px -30px #0826323b;
+  border-top-color: #fafefe;
+}
+.motionSurface[data-motion="companies"] .preview { transform: rotateY(-2deg); }
+.motionSurface[data-motion="campaigns"] .preview { transform: rotateY(2deg); border-color: #a8c9c7; }
+.motionSurface[data-motion="followups"] .preview { transform: rotateX(1deg); }
+.motionSurface .convergence { perspective: 900px; }
+.motionSurface .core {
+  transform: rotateX(7deg) rotateY(-8deg);
+  border-color: #a3cbc2;
+  background: linear-gradient(135deg, #fff, #e4f1ed);
+  box-shadow: 4px 5px 0 #c6ddd6, 8px 10px 0 #dbe9e4, 0 24px 48px #153e4726;
+}
+.motionSurface .core::before {
+  content: "";
+  position: absolute;
+  inset: -25px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #168b8320, transparent 68%);
+  z-index: -1;
+  animation: coreLight 6s ease-in-out infinite;
+  animation-play-state: paused;
+}
+.motionSurface .connectionNode {
+  background: linear-gradient(135deg, #fff, #f2f8f6);
+  box-shadow: 0 2px 0 #d7e6e1, 0 12px 26px #153e4712;
+  animation: connectedFloat 7s ease-in-out infinite;
+  animation-play-state: paused;
+  transition: border-color .25s, box-shadow .25s;
+}
+.motionSurface .connectionNode[data-position="1"] { animation-duration: 8.5s; animation-delay: -3s; }
+.motionSurface .connectionNode[data-position="2"] { animation-duration: 9s; animation-delay: -5s; }
+.motionSurface .connectionNode[data-position="3"] { animation-duration: 7.5s; animation-delay: -2s; }
+.motionSurface .connectionNode[data-position="4"] { animation-duration: 10s; animation-delay: -4s; }
+.motionSurface .convergenceLines {
+  border-color: #168b8333;
+  background:
+    linear-gradient(32deg, transparent 49.7%, #168b8333 50%, transparent 50.4%),
+    linear-gradient(-35deg, transparent 49.7%, #168b8333 50%, transparent 50.4%),
+    linear-gradient(90deg, transparent 49.7%, #168b8329 50%, transparent 50.4%);
+}
+.motionSurface[data-ambient="running"] .connectionNode,
+.motionSurface[data-ambient="running"] .core::before { animation-play-state: running; }
+.primary, .headerAccess { transition: background .25s, border-color .25s, box-shadow .25s, transform .25s; }
+.primary svg, .headerAccess svg, .textLink svg, .resourceGrid svg { transition: transform .25s; }
+.primary:focus-visible, .headerAccess:focus-visible { box-shadow: 0 0 0 7px #168b8328; }
+.resourceGrid article { position: relative; transition: background .3s, box-shadow .3s, border-color .3s; }
+@media (hover: hover) and (pointer: fine) {
+  .primary:hover { box-shadow: 0 6px 18px #001f2528; }
+  .primary:hover svg, .headerAccess:hover svg, .textLink:hover svg { transform: translateX(3px); }
+  .resourceGrid article:hover { border-color: #a1c9c0; background: #f1f7f5; box-shadow: inset 0 3px 0 #168b83; }
+  .resourceGrid article:hover svg { transform: translateY(-3px); }
+  .motionSurface .connectionNode:hover { border-color: #80bdb1; box-shadow: 0 3px 0 #c5e0d7, 0 16px 30px #153e4720; }
+}
+@keyframes connectedFloat {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -6px; }
+}
+@keyframes coreLight {
+  0%, 100% { opacity: .5; }
+  50% { opacity: 1; }
+}
+@media (min-width: 1440px) {
+  .brandScene { height: 320px; }
+}
+@media (max-width: 1100px) {
+  .heroVisual { padding-top: 0; }
+  .heroGrid { gap: 30px; }
+}
+@media (max-width: 1023px) {
+  .brandScene { height: 250px; }
+  .brandScene .symbolPlate { width: 190px; height: 190px; }
+}
+@media (max-width: 800px) {
+  .motionSurface .preview { transform: none; }
+  .motionSurface .connectionNode, .motionSurface .core::before { animation: none; }
+}
+@media (max-width: 480px) {
+  .heroVisual { padding-top: 0; }
+  .brandScene { height: 230px; }
+  .brandScene .symbolPlate { width: 165px; height: 165px; }
+  .heroPreview { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .motionSurface, .motionSurface .preview { transform: none; }
+  .brandScene .sceneSurface { display: none; }
+  .brandScene .sceneFallback { opacity: 1; }
+  .primary:hover svg, .headerAccess:hover svg, .textLink:hover svg, .resourceGrid article:hover svg { transform: none; }
+}
