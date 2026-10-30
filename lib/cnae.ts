@@ -67,19 +67,44 @@ export function normalizeSnapshot(input: unknown): CnaeSnapshot {
   return { cnpj, principal, secondaries, source, reference };
 }
 
+export class BrasilApiRateLimitError extends Error {
+  readonly retryAfterSeconds: number | null;
+
+  constructor(retryAfter: string | null) {
+    super("A BrasilAPI limitou temporariamente esta consulta (429). Aguarde antes de tentar novamente ou utilize os dados da Receita Federal.");
+    this.name = "BrasilApiRateLimitError";
+    // HTTP Retry-After may be seconds or an HTTP-date. Never invent a duration.
+    const raw = retryAfter?.trim() || "";
+    const seconds = /^\d{1,8}$/.test(raw) ? Number(raw) : NaN;
+    const dateSeconds = Number.isNaN(seconds) && raw.length < 100 && raw
+      ? Math.ceil((Date.parse(raw) - Date.now()) / 1000)
+      : NaN;
+    const delay = Number.isFinite(seconds) ? seconds : dateSeconds;
+    this.retryAfterSeconds = Number.isFinite(delay) && delay > 0 && delay <= 86400
+      ? Math.ceil(delay)
+      : null;
+  }
+}
+
 export async function lookupBrasilApi(cnpj: string): Promise<CnaeSnapshot> {
   const normalized = normalizeCnpjForLookup(cnpj);
   if (!normalized) throw new Error("CNPJ inválido para consulta.");
   // The host is constant and never user-controlled (prevents SSRF).
   const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${normalized}`, {
-    headers: { Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      // Algumas requisições server-side são recusadas pelo WAF do provedor
+      // quando o cliente não se identifica com um User-Agent explícito.
+      "User-Agent": "ProspectaCRM/1.0",
+    },
     signal: AbortSignal.timeout(8000),
     cache: "no-store",
   });
   if (!response.ok) {
     // Do not leak provider response bodies into logs/clients.
     if (response.status === 404) throw new Error("CNPJ não encontrado na fonte consultada.");
-    if (response.status === 429) throw new Error("Limite de consultas da fonte atingido. Tente mais tarde.");
+    if (response.status === 429) throw new BrasilApiRateLimitError(response.headers.get("Retry-After"));
+    if (response.status === 403) throw new Error("A BrasilAPI recusou a consulta (403). Verifique as políticas do provedor e tente novamente.");
     throw new Error("Consulta CNAE temporariamente indisponível.");
   }
   const declaredLength = Number(response.headers.get("content-length") || 0);

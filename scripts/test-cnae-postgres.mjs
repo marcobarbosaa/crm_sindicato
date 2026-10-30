@@ -109,6 +109,25 @@ try {
       assert.equal((await lookup.POST(makeReq("/api/companies/999999/cnaes","POST"), { params: Promise.resolve({ id:"999999" }) })).status,404);
     } finally { globalThis.fetch = original; }
   });
+  await step("HTTP 429 da BrasilAPI preserva cadastro e informa Retry-After", async () => {
+    const [d] = await db.select().from(companies).where(eq(companies.name, "Empresa D"));
+    const original = globalThis.fetch;
+    try {
+      globalThis.fetch = async () => new Response("Bloqueado temporariamente", {
+        status: 429, headers: { "Retry-After": "120" },
+      });
+      const res = await lookup.POST(
+        makeReq("/api/companies/" + d.id + "/cnaes", "POST"),
+        { params: Promise.resolve({ id:String(d.id) }) },
+      );
+      const payload = await response(res, 429);
+      assert.equal(payload.retryAfterSeconds, 120);
+      assert.equal(res.headers.get("Retry-After"), "120");
+      const [still] = await db.select().from(companies).where(eq(companies.id, d.id));
+      assert.equal(still.cnaePrimaryCode, null);
+      assert.equal(still.cnaeSource, null);
+    } finally { globalThis.fetch = original; }
+  });
   await step("Planilha posterior não sobrescreve CNAE verificado", async () => {
     const v = await response(await imports.POST(makeReq("/api/imports","POST",{ rows:[{ ...rows[0],cnaePrimaryCode:"9999999",cnaeSecondaryCodes:""}],duplicateStrategy:"update" })),201);
     assert.equal(v.updated,1);
