@@ -110,20 +110,20 @@ export function calculateCompanySize(
 
 export function normalizeCnpj(value: unknown): string | null {
   if (value === null || value === undefined) return null;
-  const digits = String(value).replace(/\D/g, "");
+  const digits = String(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
   return digits.length === 0 ? null : digits;
 }
 
 export function isValidCnpj(value: unknown): boolean {
   const cnpj = normalizeCnpj(value);
-  return cnpj === null || cnpj.length === 14;
+  return cnpj === null || /^[A-Z0-9]{12}[0-9]{2}$/.test(cnpj);
 }
 
 export function formatCnpj(value: string | null | undefined): string {
   const digits = normalizeCnpj(value);
   if (!digits || digits.length !== 14) return value || "";
   return digits.replace(
-    /^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,
+    /^([A-Z0-9]{2})([A-Z0-9]{3})([A-Z0-9]{3})([A-Z0-9]{4})([0-9]{2})$/,
     "$1.$2.$3/$4-$5",
   );
 }

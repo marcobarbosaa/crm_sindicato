@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, count, desc, eq, ilike, isNotNull, isNull, like, ne, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, isNotNull, isNull, like, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activityLogs, companies, contacts } from "@/db/schema";
 import {
@@ -10,6 +10,7 @@ import {
 } from "@/lib/company-size";
 import { normalizeBrazilianPhone, normalizeWhatsAppStatus } from "@/lib/phone";
 import { isValidRegion, parseRegion } from "@/lib/region";
+import { normalizeCnae } from "@/lib/cnae";
 
 const ownerId = () => "local-preview-user";
 
@@ -45,6 +46,12 @@ export async function GET(request: NextRequest) {
   const phone = params.get("phone");
   const mobile = params.get("mobile");
   const companySize = params.get("companySize")?.trim();
+  const cnaeRaw = params.get("cnae")?.trim() || "";
+  const cnaeCode = cnaeRaw ? normalizeCnae(cnaeRaw) : null;
+  if (cnaeRaw && !cnaeCode) return NextResponse.json({ error: "CNAE inválido." }, { status: 400 });
+  const cnaeScope = params.get("cnaeScope") === "principal" ? "principal" : "any";
+  const cnaeStatus = params.get("cnaeStatus");
+  const cnaeCondition = cnaeCode ? (cnaeScope === "principal" ? eq(companies.cnaePrimaryCode, cnaeCode) : or(eq(companies.cnaePrimaryCode, cnaeCode), sql`${companies.cnaeSecondaries} @> ${JSON.stringify([{ code: cnaeCode }])}::jsonb`)) : undefined;
 
   const searchCondition = search
     ? or(
@@ -55,12 +62,16 @@ export async function GET(request: NextRequest) {
           : undefined,
         ilike(companies.primaryEmail, `%${search}%`),
         ilike(companies.segment, `%${search}%`),
+        ilike(companies.cnaePrimaryDescription, `%${search}%`),
+        like(companies.cnaePrimaryCode, `%${search.replace(/\D/g, "")}%`),
       )
     : undefined;
 
   const condition = and(
     eq(companies.ownerId, owner),
     searchCondition,
+    cnaeCondition,
+    cnaeStatus === "with" ? isNotNull(companies.cnaePrimaryCode) : cnaeStatus === "without" ? isNull(companies.cnaePrimaryCode) : undefined,
     Number.isInteger(region) && region >= 1 && region <= 17 ? eq(companies.region, region) : undefined,
     city ? eq(companies.city, city) : undefined,
     presenceFilter(companies.primaryEmail, email),
@@ -133,7 +144,7 @@ export async function POST(request: NextRequest) {
     );
   if (!isValidCnpj(body.cnpj))
     return NextResponse.json(
-      { error: "O CNPJ deve conter 14 dígitos." },
+      { error: "O CNPJ deve ter 14 caracteres válidos." },
       { status: 400 },
     );
   if (!isValidEmployeeCount(body.employeeCount))
