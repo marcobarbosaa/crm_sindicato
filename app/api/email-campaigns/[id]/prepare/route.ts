@@ -5,6 +5,8 @@ import { getDb } from "@/db";
 import { companies, contacts, emailCampaignRecipients, emailCampaigns } from "@/db/schema";
 import { loadSendAttachments } from "@/lib/attachment-service";
 import { audienceKnownInvalid, audienceRecipient, primaryContactId } from "@/lib/campaign-audience";
+import { normalizeCnae } from "@/lib/cnae";
+import { cnaeMatches } from "@/lib/cnae-filter";
 
 const ownerId = () => "local-preview-user";
 
@@ -13,6 +15,8 @@ type Audience = {
   city?: string;
   companySize?: string;
   companyStatus?: string;
+  cnae?: string;
+  cnaeScope?: "any" | "principal";
   groupIds?: number[];
 };
 
@@ -35,8 +39,10 @@ export async function POST(...[, context]: [NextRequest, { params: Promise<{ id:
   }
 
   const audience = (campaign.audience || {}) as Audience;
+  if (audience.cnae && !normalizeCnae(audience.cnae)) return NextResponse.json({ error: "Filtro CNAE inválido." }, { status: 400 });
   const condition = and(
     eq(companies.ownerId, owner),
+    audience.cnae ? cnaeMatches(audience.cnae, audience.cnaeScope === "principal" ? "principal" : "any") : undefined,
     Number.isInteger(audience.region) ? eq(companies.region, Number(audience.region)) : undefined,
     audience.city ? eq(companies.city, audience.city) : undefined,
     audience.companySize ? eq(companies.companySize, audience.companySize) : undefined,

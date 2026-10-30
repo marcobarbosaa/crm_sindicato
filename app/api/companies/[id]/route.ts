@@ -67,7 +67,7 @@ export async function PATCH(
     );
   if (!isValidCnpj(body.cnpj))
     return NextResponse.json(
-      { error: "O CNPJ deve conter 14 dígitos." },
+      { error: "O CNPJ deve ter 14 caracteres válidos." },
       { status: 400 },
     );
   if (!isValidEmployeeCount(body.employeeCount))
@@ -104,8 +104,9 @@ export async function PATCH(
         name: body.name.trim(),
         tradeName: body.tradeName?.trim() || null,
         cnpj: normalizeCnpj(body.cnpj),
+        ...(normalizeCnpj(body.cnpj) !== existing.cnpj ? { cnaePrimaryCode: null, cnaePrimaryDescription: null, cnaeSecondaries: [], cnaeSource: null, cnaeReference: null, cnaeSyncedAt: null } : {}),
         website: body.website?.trim() || null,
-        segment: body.segment?.trim() || null,
+        segment: body.segment === undefined ? existing.segment : body.segment?.trim() || null,
         region: parseRegion(body.region),
         address: body.address?.trim() || null,
         city: body.city?.trim() || null,

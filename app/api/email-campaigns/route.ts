@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 
 import { getDb } from "@/db";
 import { emailCampaigns, emailTemplates } from "@/db/schema";
+import { normalizeCnae } from "@/lib/cnae";
 
 const ownerId = () => "local-preview-user";
 
@@ -11,6 +12,8 @@ type Audience = {
   city?: string;
   companySize?: string;
   companyStatus?: string;
+  cnae?: string;
+  cnaeScope?: "any" | "principal";
   groupIds?: number[];
 };
 
@@ -53,11 +56,15 @@ export async function POST(request: NextRequest) {
 
   const batchSize = Number.isInteger(input.batchSize) ? Math.min(100, Math.max(1, Number(input.batchSize))) : 25;
   const intervalMinutes = Number.isInteger(input.intervalMinutes) ? Math.max(1, Number(input.intervalMinutes)) : 10;
+  const cnaeRaw = input.audience?.cnae?.trim() || "";
+  const cnaeCode = cnaeRaw ? normalizeCnae(cnaeRaw) : null;
+  if (cnaeRaw && !cnaeCode) return NextResponse.json({ error: "CNAE inválido na seleção de destinatários." }, { status: 400 });
   const audience: Audience = {
     ...(Number.isInteger(input.audience?.region) && Number(input.audience?.region) >= 1 && Number(input.audience?.region) <= 17 ? { region: Number(input.audience?.region) } : {}),
     ...(input.audience?.city?.trim() ? { city: input.audience.city.trim() } : {}),
     ...(input.audience?.companySize?.trim() ? { companySize: input.audience.companySize.trim() } : {}),
     ...(input.audience?.companyStatus?.trim() ? { companyStatus: input.audience.companyStatus.trim() } : {}),
+    ...(cnaeCode ? { cnae: cnaeCode, cnaeScope: input.audience?.cnaeScope === "principal" ? "principal" as const : "any" as const } : {}),
     ...(Array.isArray(input.audience?.groupIds) ? { groupIds: input.audience.groupIds.filter(Number.isInteger) } : {}),
   };
   const now = new Date();

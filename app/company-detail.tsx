@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  Building2, Clock3, Edit3, Mail, MessageCircle, MapPin, MoreHorizontal, Phone, Plus, Star, Trash2, UserRound,
+  Building2, Clock3, Edit3, Mail, MessageCircle, MapPin, MoreHorizontal, Phone, Plus, RefreshCw, Star, Trash2, UserRound,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,7 +19,7 @@ import { formatCnpj, parseWorkforce } from "@/lib/company-size";
 import { deliveryLabels } from "@/lib/delivery-policy";
 import { formatBrazilianPhone } from "@/lib/phone";
 
-type Company = { id: number; name: string; tradeName?: string | null; cnpj?: string | null; website?: string | null; primaryEmail?: string | null; primaryEmailStatus?: string; primaryEmailStatusReason?: string | null; segment?: string | null; region?: number | null; address?: string | null; city?: string | null; state?: string | null; phone?: string | null; phoneWhatsAppStatus?: "UNKNOWN" | "YES" | "NO"; mobile?: string | null; mobileWhatsAppStatus?: "UNKNOWN" | "YES" | "NO"; employeeCount?: number | null; employeeRange?: string | null; companySize?: string | null; notes?: string | null; status: string; createdAt: string; updatedAt: string };
+type Company = { id: number; name: string; tradeName?: string | null; cnpj?: string | null; website?: string | null; primaryEmail?: string | null; primaryEmailStatus?: string; primaryEmailStatusReason?: string | null; segment?: string | null; cnaePrimaryCode?: string | null; cnaePrimaryDescription?: string | null; cnaeSecondaries?: { code:string; description:string }[]; cnaeSource?: string | null; cnaeReference?: string | null; cnaeSyncedAt?: string | null; region?: number | null; address?: string | null; city?: string | null; state?: string | null; phone?: string | null; phoneWhatsAppStatus?: "UNKNOWN" | "YES" | "NO"; mobile?: string | null; mobileWhatsAppStatus?: "UNKNOWN" | "YES" | "NO"; employeeCount?: number | null; employeeRange?: string | null; companySize?: string | null; notes?: string | null; status: string; createdAt: string; updatedAt: string };
 type Contact = { id: number; name?: string | null; email?: string | null; phone?: string | null; role?: string | null; isPrimary: boolean; createdAt: string };
 type Activity = { id: number; type: string; description: string; createdAt: string };
 type Detail = { company: Company; contacts: Contact[]; activities: Activity[] };
@@ -49,6 +49,7 @@ function activityIcon(type: string) {
 }
 
 export function CompanyDetail({ companyId, onClose, onChanged }: { companyId: number | null; onClose: () => void; onChanged: () => void }) {
+  const [refreshingCnaes, setRefreshingCnaes] = useState(false);
   const [data, setData] = useState<Detail | null>(null), [loadingId, setLoadingId] = useState<number | null>(null), [saving, setSaving] = useState(false), [editingCompanyId, setEditingCompanyId] = useState<number | null>(null), [contactOpen, setContactOpen] = useState(false), [editingContact, setEditingContact] = useState<Contact | null>(null);
   const visibleData = data?.company.id === companyId ? data : null;
   const loading = companyId !== null && (loadingId === companyId || !visibleData);
@@ -65,6 +66,7 @@ export function CompanyDetail({ companyId, onClose, onChanged }: { companyId: nu
   }, [companyId, load]);
   async function saveCompany(e: React.FormEvent<HTMLFormElement>) { e.preventDefault(); if (!companyId) return; setSaving(true); const body = Object.fromEntries(new FormData(e.currentTarget)); body.statusLabel = statuses.find(s => s[0] === body.status)?.[1] || String(body.status); const r = await fetch(`/api/companies/${companyId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); const result = await r.json() as { error?: string }; setSaving(false); if (!r.ok) return toast.error(result.error || "Não foi possível salvar."); toast.success("Dados atualizados."); setEditingCompanyId(null); await load(); onChanged() }
   async function deleteContact(contact: Contact) { if (!companyId || !confirm(`Remover o contato ${contact.name || contact.email}?`)) return; const r = await fetch(`/api/companies/${companyId}/contacts?contactId=${contact.id}`, { method: "DELETE" }); if (r.ok) { toast.success("Contato removido."); await load() } else toast.error("Não foi possível remover o contato.") }
+  async function refreshCnaes() { if (!companyId || refreshingCnaes) return; setRefreshingCnaes(true); try { const r = await fetch(`/api/companies/${companyId}/cnaes`, { method: "POST" }); const result = await r.json() as { error?: string; cached?: boolean }; if (!r.ok) throw new Error(result.error || "Consulta indisponível."); toast.success(result.cached ? "CNAEs consultados recentemente. Dados preservados." : "CNAEs atualizados pela BrasilAPI."); await load(); onChanged() } catch (error) { toast.error(error instanceof Error ? error.message : "Falha ao consultar CNAEs."); } finally { setRefreshingCnaes(false) } }
   async function restoreEmailStatus() { if (!visibleData) return; setSaving(true); try { const r = await fetch(`/api/companies/${companyId}/email-status`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedEmail: visibleData.company.primaryEmail || "" }) }); if (!r.ok) throw new Error(); toast.success("Status do e-mail restaurado."); await load(); onChanged() } catch { toast.error("Não foi possível restaurar o status. Atualize a empresa e tente novamente.") } finally { setSaving(false) } }
   return <Sheet open={companyId !== null} onOpenChange={open => { if (!open) { setEditingCompanyId(null); onClose() } }}>
     <SheetContent className="company-sheet sm:max-w-[820px]" aria-describedby="company-detail-description">
@@ -77,7 +79,7 @@ export function CompanyDetail({ companyId, onClose, onChanged }: { companyId: nu
           <div className="company-detail-avatar">{visibleData.company.name.slice(0, 2).toUpperCase()}</div>
           <div className="company-detail-identity">
             <h2>{visibleData.company.name}</h2>
-            <p>{visibleData.company.tradeName || visibleData.company.segment || "Segmento não informado"}</p>
+            <p>{visibleData.company.tradeName || visibleData.company.cnaePrimaryDescription || "CNAE ainda não identificado"}</p>
             {(visibleData.company.city || visibleData.company.state) && <div className="company-detail-head-meta"><MapPin />{[visibleData.company.city, visibleData.company.state].filter(Boolean).join(", ")}</div>}
             <div className="company-detail-badges">
               <span className={`company-detail-badge status ${statusClass[visibleData.company.status] || ""}`}>{statuses.find(s => s[0] === visibleData.company.status)?.[1] || visibleData.company.status}</span>
@@ -94,7 +96,7 @@ export function CompanyDetail({ companyId, onClose, onChanged }: { companyId: nu
             <TabsTrigger value="contacts">Contatos <b>{visibleData.contacts.length}</b></TabsTrigger>
             <TabsTrigger value="activity">Timeline <b>{visibleData.activities.length}</b></TabsTrigger>
           </TabsList>
-          <TabsContent value="overview">{editing ? <CompanyForm company={visibleData.company} saving={saving} onSubmit={saveCompany} /> : <CompanyOverview company={visibleData.company} />}</TabsContent>
+          <TabsContent value="overview">{editing ? <CompanyForm company={visibleData.company} saving={saving} onSubmit={saveCompany} /> : <CompanyOverview company={visibleData.company} onRefreshCnaes={refreshCnaes} refreshingCnaes={refreshingCnaes} />}</TabsContent>
           <TabsContent value="contacts">
             <div className="section-toolbar">
               <div>
@@ -150,7 +152,7 @@ export function CompanyDetail({ companyId, onClose, onChanged }: { companyId: nu
   </Sheet>;
 }
 
-function CompanyOverview({ company }: { company: Company }) {
+function CompanyOverview({ company, onRefreshCnaes, refreshingCnaes }: { company: Company; onRefreshCnaes: () => void; refreshingCnaes: boolean }) {
   const emailInvalid = company.primaryEmailStatus === "INVALID";
   return <div className="company-detail-overview">
     <section className="company-detail-section">
@@ -160,9 +162,21 @@ function CompanyOverview({ company }: { company: Company }) {
         <Field2 label="Razão social" value={company.tradeName} />
         <Field2 label="Porte" value={company.companySize} />
         <Field2 label="Quadro de funcionários" value={company.employeeRange || (company.employeeCount == null ? null : String(company.employeeCount))} />
-        <Field2 label="Segmento" value={company.segment} />
         <Field2 label="Site" value={company.website} />
       </div>
+    </section>
+    <section className="company-detail-section">
+      <div className="section-toolbar">
+        <div><h3>Atividades econômicas (CNAE)</h3><p>Atividades principal e secundárias vinculadas ao CNPJ.</p></div>
+        <Button type="button" variant="outline" size="sm" disabled={refreshingCnaes || !company.cnpj} onClick={onRefreshCnaes}><RefreshCw className={refreshingCnaes ? "spin" : ""}/>{refreshingCnaes ? "Consultando..." : "Consultar BrasilAPI"}</Button>
+      </div>
+      {company.cnaePrimaryCode ? <div className="company-detail-fields">
+        <Field2 label="CNAE principal" value={company.cnaePrimaryCode} />
+        <Field2 label="Descrição" value={company.cnaePrimaryDescription} />
+        {(company.cnaeSecondaries || []).length > 0 && <div className="company-detail-field"><span>CNAEs secundários ({company.cnaeSecondaries?.length})</span><ul>{company.cnaeSecondaries?.map(item => <li key={item.code}><strong>{item.code}</strong>{item.description ? ` — ${item.description}` : ""}</li>)}</ul></div>}
+        <Field2 label="Fonte" value={company.cnaeSource === "RECEITA" ? `Receita Federal (${company.cnaeReference || "sem competência"})` : company.cnaeSource === "BRASILAPI" ? "BrasilAPI" : company.cnaeSource === "PLANILHA" ? "Planilha (não verificado)" : "Não informada"} />
+        <Field2 label="Consulta" value={company.cnaeSyncedAt ? new Date(company.cnaeSyncedAt).toLocaleDateString("pt-BR") : "Não verificada"} />
+      </div> : <p>CNAE ainda não identificado. Consulte a BrasilAPI ou importe a base pública da Receita Federal.</p>}
     </section>
     <section className="company-detail-section">
       <h3>Contato</h3>
@@ -220,13 +234,12 @@ function CompanyForm({ company, saving, onSubmit }: { company: Company; saving: 
     <div className="form-grid">
       <Field name="name" label="Nome fantasia *" defaultValue={company.name} required />
       <Field name="tradeName" label="Razão social" defaultValue={company.tradeName || ""} />
-      <Field name="cnpj" label="CNPJ" inputMode="numeric" defaultValue={formatCnpj(company.cnpj)} />
+      <Field name="cnpj" label="CNPJ" inputMode="text" defaultValue={formatCnpj(company.cnpj)} />
       <Field name="primaryEmail" label="E-mail" type="email" defaultValue={company.primaryEmail || ""} />
       <Field name="phone" label="Telefone" defaultValue={formatBrazilianPhone(company.phone)} />
       <WhatsAppStatusField name="phoneWhatsAppStatus" label="WhatsApp do telefone" defaultValue={company.phoneWhatsAppStatus || "UNKNOWN"} />
       <Field name="mobile" label="Celular" defaultValue={formatBrazilianPhone(company.mobile)} />
       <WhatsAppStatusField name="mobileWhatsAppStatus" label="WhatsApp do celular" defaultValue={company.mobileWhatsAppStatus || "UNKNOWN"} />
-      <Field name="segment" label="Segmento" defaultValue={company.segment || ""} />
       <Field name="region" label="Região" type="number" min="1" max="17" defaultValue={company.region ? String(company.region) : ""} />
       <Field name="address" label="Endereço" defaultValue={company.address || ""} />
       <Field name="city" label="Cidade" defaultValue={company.city || ""} />

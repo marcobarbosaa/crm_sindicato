@@ -10,6 +10,7 @@ import {
 } from "@/lib/company-size";
 import { normalizeBrazilianPhone } from "@/lib/phone";
 import { isValidRegion, parseRegion } from "@/lib/region";
+import { normalizeCnae, parseCnaeCodes } from "@/lib/cnae";
 
 type ImportRow = {
   name?: string;
@@ -17,6 +18,8 @@ type ImportRow = {
   cnpj?: string;
   website?: string;
   segment?: string;
+  cnaePrimaryCode?: string;
+  cnaeSecondaryCodes?: string;
   region?: string;
   address?: string;
   city?: string;
@@ -88,7 +91,7 @@ export async function POST(request: NextRequest) {
         review.push({
           index,
           status: "error",
-          reason: "CNPJ deve conter 14 dígitos",
+          reason: "CNPJ deve ter 14 caracteres válidos",
         });
         continue;
       }
@@ -106,6 +109,10 @@ export async function POST(request: NextRequest) {
           status: "error",
           reason: "Região deve estar entre 1 e 17",
         });
+        continue;
+      }
+      if ((clean(row.cnaePrimaryCode) && !normalizeCnae(row.cnaePrimaryCode)) || parseCnaeCodes(row.cnaeSecondaryCodes) === null || (clean(row.cnaeSecondaryCodes) && !clean(row.cnaePrimaryCode))) {
+        review.push({ index, status: "error", reason: "CNAE principal ou secundários inválidos" });
         continue;
       }
       if (cnpj && seenCnpjs.has(cnpj)) {
@@ -178,7 +185,10 @@ export async function POST(request: NextRequest) {
       !name ||
       !isValidCnpj(row.cnpj) ||
       !isValidEmployeeCount(row.employeeCount) ||
-      !isValidRegion(row.region)
+      !isValidRegion(row.region) ||
+      (clean(row.cnaePrimaryCode) && !normalizeCnae(row.cnaePrimaryCode)) ||
+      parseCnaeCodes(row.cnaeSecondaryCodes) === null ||
+      (clean(row.cnaeSecondaryCodes) && !clean(row.cnaePrimaryCode))
     ) {
       errors++;
       failedRows.push({
@@ -227,6 +237,8 @@ export async function POST(request: NextRequest) {
       const now = new Date();
       const hasEmployeeCount = clean(row.employeeCount) !== null;
       const workforce = parseWorkforce(row.employeeCount);
+      const cnaeCode = clean(row.cnaePrimaryCode) ? normalizeCnae(row.cnaePrimaryCode) : null;
+      const secondaryCodes = (parseCnaeCodes(row.cnaeSecondaryCodes) || []).filter(code => code !== cnaeCode);
       if (existing) {
         await db
           .update(companies)
@@ -236,6 +248,16 @@ export async function POST(request: NextRequest) {
             cnpj: cnpj ?? existing.cnpj,
             website: clean(row.website) ?? existing.website,
             segment: clean(row.segment) ?? existing.segment,
+            // Never replace verified Receita/BrasilAPI data with unchecked
+            // values from a spreadsheet.
+            ...(cnaeCode && existing.cnaeSource !== "RECEITA" && existing.cnaeSource !== "BRASILAPI" ? {
+              cnaePrimaryCode: cnaeCode,
+              cnaePrimaryDescription: existing.cnaePrimaryCode === cnaeCode ? existing.cnaePrimaryDescription : null,
+              cnaeSecondaries: secondaryCodes.map(code => ({ code, description: existing.cnaeSecondaries.find(item => item.code === code)?.description || "" })),
+              cnaeSource: "PLANILHA",
+              cnaeReference: null,
+              cnaeSyncedAt: null,
+            } : {}),
             region: clean(row.region)
               ? parseRegion(row.region)
               : existing.region,
@@ -280,6 +302,12 @@ export async function POST(request: NextRequest) {
             cnpj,
             website: clean(row.website),
             segment: clean(row.segment),
+            cnaePrimaryCode: cnaeCode,
+            cnaePrimaryDescription: null,
+            cnaeSecondaries: secondaryCodes.map(code => ({ code, description: "" })),
+            cnaeSource: cnaeCode ? "PLANILHA" : null,
+            cnaeReference: null,
+            cnaeSyncedAt: null,
             region: parseRegion(row.region),
             address: clean(row.address),
             city: clean(row.city),

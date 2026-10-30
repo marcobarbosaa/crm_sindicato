@@ -4,6 +4,8 @@ import { and, count, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { companies, contacts } from "@/db/schema";
 import { audienceKnownInvalid, audienceRecipient, primaryContactId } from "@/lib/campaign-audience";
+import { normalizeCnae } from "@/lib/cnae";
+import { cnaeMatches } from "@/lib/cnae-filter";
 
 const ownerId = () => "local-preview-user";
 
@@ -20,9 +22,14 @@ export async function GET(request: NextRequest) {
   const city = params.get("city")?.trim();
   const companySize = params.get("companySize")?.trim();
   const companyStatus = params.get("status")?.trim();
+  const cnaeRaw = params.get("cnae")?.trim() || "";
+  const cnae = cnaeRaw ? normalizeCnae(cnaeRaw) : null;
+  if (cnaeRaw && !cnae) return NextResponse.json({ error: "Informe um CNAE válido." }, { status: 400 });
+  const cnaeScope = params.get("cnaeScope") === "principal" ? "principal" : "any";
 
   const condition = and(
     eq(companies.ownerId, owner),
+    cnae ? cnaeMatches(cnae, cnaeScope) : undefined,
     validRegion(region) ? eq(companies.region, region) : undefined,
     city ? eq(companies.city, city) : undefined,
     companySize && companySize !== "all" ? eq(companies.companySize, companySize) : undefined,
@@ -57,6 +64,8 @@ export async function GET(request: NextRequest) {
       city: city || null,
       companySize: companySize && companySize !== "all" ? companySize : null,
       status: companyStatus && companyStatus !== "all" ? companyStatus : null,
+      cnae: cnae || null,
+      cnaeScope: cnae ? cnaeScope : null,
     },
   });
 }

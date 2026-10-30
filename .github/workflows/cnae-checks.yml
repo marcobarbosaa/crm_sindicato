@@ -1,0 +1,52 @@
+name: CNAE checks
+
+on:
+  push:
+    branches: [feat/cnae-brasilapi-receita]
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'db/**'
+      - 'lib/**'
+      - 'scripts/**'
+      - 'supabase/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/cnae-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-cnae:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test Receita extractor (offline fixtures)
+        run: python3 scripts/test-receita-cnaes.py
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test CNAE normalization and BrasilAPI mocks
+        run: node --test scripts/test-cnae.mjs
+      - name: Check TypeScript
+        run: pnpm exec tsc --noEmit
+      - name: Lint
+        run: pnpm lint
+      - name: Build
+        run: pnpm build

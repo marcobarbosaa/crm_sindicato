@@ -700,11 +700,7 @@ function CompanyDialog({
               </div>
             </div>
             <Field id="website" label="Site" placeholder="empresa.com.br" />
-            <Field
-              id="segment"
-              label="Segmento"
-              placeholder="Ex.: Tecnologia"
-            />
+            <div className="field"><Label>CNAE</Label><p>As atividades econômicas podem ser consultadas pelo CNPJ após salvar a empresa.</p></div>
           </div>
           <DialogFooter>
             <Button

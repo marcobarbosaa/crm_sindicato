@@ -40,6 +40,8 @@ type Target =
   | "primaryEmail"
   | "website"
   | "segment"
+  | "cnaePrimaryCode"
+  | "cnaeSecondaryCodes"
   | "phone"
   | "mobile"
   | "address"
@@ -109,8 +111,18 @@ const fields: {
   { key: "website", label: "Site", aliases: ["site", "website", "url"] },
   {
     key: "segment",
-    label: "Segmento",
+    label: "Segmento antigo (legado)",
     aliases: ["segmento", "setor", "segment", "industry"],
+  },
+  {
+    key: "cnaePrimaryCode",
+    label: "CNAE principal (código)",
+    aliases: ["cnae", "cnae principal", "codigo cnae", "cnae fiscal principal"],
+  },
+  {
+    key: "cnaeSecondaryCodes",
+    label: "CNAEs secundários (códigos separados por vírgula)",
+    aliases: ["cnaes secundarios", "cnaes secundários", "cnae fiscal secundaria", "cnae secundario"],
   },
   {
     key: "phone",
