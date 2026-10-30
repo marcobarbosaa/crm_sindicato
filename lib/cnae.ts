@@ -16,6 +16,21 @@ export function normalizeCnae(value: unknown): string | null {
   return /^\d{7}$/.test(code) ? code : null;
 }
 
+/** Parses a comma/semicolon separated spreadsheet field of CNAE codes. */
+export function parseCnaeCodes(value: unknown): string[] | null {
+  const input = String(value ?? "").trim();
+  if (!input) return [];
+  const parts = input.split(/[,;\n]+/).map(item => item.trim()).filter(Boolean);
+  if (parts.length > 200) return null;
+  const result: string[] = [];
+  for (const item of parts) {
+    const code = normalizeCnae(item);
+    if (!code) return null;
+    if (!result.includes(code)) result.push(code);
+  }
+  return result;
+}
+
 export function normalizeCnpjForLookup(value: unknown): string | null {
   const normalized = String(value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   return /^[A-Z0-9]{12}\d{2}$/.test(normalized) ? normalized : null;
