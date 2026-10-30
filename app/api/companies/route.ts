@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
         ilike(companies.primaryEmail, `%${search}%`),
         ilike(companies.segment, `%${search}%`),
         ilike(companies.cnaePrimaryDescription, `%${search}%`),
-        like(companies.cnaePrimaryCode, `%${search.replace(/\D/g, "")}%`),
+        search.replace(/\D/g, "") ? like(companies.cnaePrimaryCode, `%${search.replace(/\D/g, "")}%`) : undefined,
       )
     : undefined;
 
