@@ -72,7 +72,12 @@ export async function lookupBrasilApi(cnpj: string): Promise<CnaeSnapshot> {
   if (!normalized) throw new Error("CNPJ inválido para consulta.");
   // The host is constant and never user-controlled (prevents SSRF).
   const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${normalized}`, {
-    headers: { Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      // Algumas requisições server-side são recusadas pelo WAF do provedor
+      // quando o cliente não se identifica com um User-Agent explícito.
+      "User-Agent": "ProspectaCRM/1.0",
+    },
     signal: AbortSignal.timeout(8000),
     cache: "no-store",
   });
@@ -80,6 +85,7 @@ export async function lookupBrasilApi(cnpj: string): Promise<CnaeSnapshot> {
     // Do not leak provider response bodies into logs/clients.
     if (response.status === 404) throw new Error("CNPJ não encontrado na fonte consultada.");
     if (response.status === 429) throw new Error("Limite de consultas da fonte atingido. Tente mais tarde.");
+    if (response.status === 403) throw new Error("A BrasilAPI recusou a consulta (403). Verifique as políticas do provedor e tente novamente.");
     throw new Error("Consulta CNAE temporariamente indisponível.");
   }
   const declaredLength = Number(response.headers.get("content-length") || 0);
