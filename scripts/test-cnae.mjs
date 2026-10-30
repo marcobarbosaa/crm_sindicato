@@ -43,6 +43,10 @@ test("BrasilAPI busca só o CNPJ solicitado, retorna CNAEs sem dados pessoais", 
     await assert.rejects(lookupBrasilApi("19131243000197"),/diferente/);
     globalThis.fetch=async()=>new Response("negado pelo provedor",{status:403});
     await assert.rejects(lookupBrasilApi("19131243000197"),/403/);
+    globalThis.fetch=async()=>new Response("Too Many Requests",{status:429,headers:{"Retry-After":"120"}});
+    await assert.rejects(lookupBrasilApi("19131243000197"),err=>err.name==="BrasilApiRateLimitError" && err.retryAfterSeconds===120);
+    globalThis.fetch=async()=>new Response("Too Many Requests",{status:429});
+    await assert.rejects(lookupBrasilApi("19131243000197"),err=>err.name==="BrasilApiRateLimitError" && err.retryAfterSeconds===null);
     globalThis.fetch=async()=>new Response("indisponível",{status:503});
     await assert.rejects(lookupBrasilApi("19131243000197"),/indisponível/);
   } finally { globalThis.fetch=original; }
