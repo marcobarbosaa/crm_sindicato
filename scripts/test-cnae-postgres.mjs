@@ -14,7 +14,7 @@ const u = new URL(dsn);
 if (!["127.0.0.1", "localhost", "postgres"].includes(u.hostname) || u.pathname !== "/cnae_test") {
   throw Error("Safety lock: tests require local ephemeral database cnae_test.");
 }
-const client = postgres(dsn, { max: 3, prepare: false, connect_timeout: 5 });
+const client = postgres(dsn, { max: 1, prepare: false, connect_timeout: 5 });
 let db;
 const load = loader({
   "next/server": { NextResponse: { json: (value, opts) => Response.json(value, opts) } },
