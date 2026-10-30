@@ -82,3 +82,12 @@ carrega todas as linhas em RAM; arquivos incompletos não devem ser utilizados.
   do porte cadastral da Receita e não é alterado.
 - O CNAE não é, sozinho, critério suficiente para definir enquadramento sindical
   ou vigência de instrumento coletivo.
+
+## Testes locais
+
+Após instalar as dependências, execute `pnpm test:cnae` (Node e Python 3).
+Isso exercita normalização, consulta BrasilAPI simulada e extração de ZIPs
+sintéticos sem conexão com o banco ou serviço externo. Antes do deploy executar
+também `pnpm lint` e `pnpm build` e validar a prévia de campanhas com CNAE
+principal/segundário em ambiente de homologação. Nenhuma migração foi executada
+automaticamente por esta mudança.

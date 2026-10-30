@@ -12,8 +12,9 @@ export type CnaeSnapshot = {
 };
 
 export function normalizeCnae(value: unknown): string | null {
-  const code = String(value ?? "").replace(/\D/g, "");
-  return /^\d{7}$/.test(code) ? code : null;
+  const raw = String(value ?? "").trim();
+  if (!/^\d{7}$/.test(raw) && !/^\d{2}\.\d{2}-\d\/\d{2}$/.test(raw)) return null;
+  return raw.replace(/\D/g, "");
 }
 
 /** Parses a comma/semicolon separated spreadsheet field of CNAE codes. */
