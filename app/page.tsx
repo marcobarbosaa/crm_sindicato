@@ -3,19 +3,14 @@ import { EntryExperience } from "./entry-experience";
 
 // Keep the landing page identity independent from the workspace.
 export const metadata: Metadata = {
-  title: "Prospecta — CRM de e-mails",
-  description: "Organize empresas, contatos, envios e follow-ups em um só lugar.",
+  title: "Conecta Core — Gestão e relacionamento empresarial",
+  description: "A Conecta Core reúne empresas, contatos, campanhas e acompanhamentos em uma experiência organizada, fluida e integrada de gestão e relacionamento empresarial.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/branding/favicon.svg",
+    shortcut: "/branding/favicon.svg",
   },
 };
 
 export default function Home() {
-  return (
-    <EntryExperience
-      user={{ displayName: "Administrador", email: "admin@prospecta.local" }}
-      accessHref="/workspace"
-    />
-  );
+  return <EntryExperience accessHref="/workspace" />;
 }
