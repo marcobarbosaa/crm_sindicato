@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, asc, count, desc, eq, ilike, isNotNull, isNull, like, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, isNotNull, isNull, like, ne, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { activityLogs, companies, contacts } from "@/db/schema";
 import {
@@ -11,6 +11,7 @@ import {
 import { normalizeBrazilianPhone, normalizeWhatsAppStatus } from "@/lib/phone";
 import { isValidRegion, parseRegion } from "@/lib/region";
 import { normalizeCnae } from "@/lib/cnae";
+import { cnaeMatches } from "@/lib/cnae-filter";
 
 const ownerId = () => "local-preview-user";
 
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
   if (cnaeRaw && !cnaeCode) return NextResponse.json({ error: "CNAE inválido." }, { status: 400 });
   const cnaeScope = params.get("cnaeScope") === "principal" ? "principal" : "any";
   const cnaeStatus = params.get("cnaeStatus");
-  const cnaeCondition = cnaeCode ? (cnaeScope === "principal" ? eq(companies.cnaePrimaryCode, cnaeCode) : or(eq(companies.cnaePrimaryCode, cnaeCode), sql`${companies.cnaeSecondaries} @> ${JSON.stringify([{ code: cnaeCode }])}::jsonb`)) : undefined;
+  const cnaeCondition = cnaeCode ? cnaeMatches(cnaeCode, cnaeScope) : undefined;
 
   const searchCondition = search
     ? or(
