@@ -66,25 +66,31 @@ async function execute() {
   }
   let checkedCount = 0, updated = 0, skipped = 0;
   const seen = new Set();
-  const read = createInterface({ input: createReadStream(inputFile, { encoding: "utf8" }), crlfDelay: Infinity });
-  for await (const line of read) {
-    if (!line.trim()) continue;
-    if (line.length > 50_000) throw Error("Linha JSONL excessivamente longa.");
-    const value = checked(JSON.parse(line));
+  async function* records() {
+    const read = createInterface({ input: createReadStream(inputFile, { encoding: "utf8" }), crlfDelay: Infinity });
+    for await (const line of read) {
+      if (!line.trim()) continue;
+      if (line.length > 50_000) throw Error("Linha JSONL excessivamente longa.");
+      yield checked(JSON.parse(line));
+    }
+  }
+  // Validate ALL records first, before permitting any database writes.
+  for await (const value of records()) {
     if (seen.has(value.cnpj)) throw Error("CNPJ duplicado no JSONL.");
     seen.add(value.cnpj);
     checkedCount++;
-    if (!confirmed) continue;
-    // Does not overwrite records fetched from BrasilAPI unless explicitly
-    // reviewed in the application. Existing CRM email/contacts remain intact.
+  }
+  if (confirmed) for await (const value of records()) {
+    // Does not overwrite records fetched from BrasilAPI.
+    const now = Date.now();
     const result = await sql`update public.companies
       set cnae_primary_code = ${value.principal.code},
           cnae_primary_description = ${value.principal.description.slice(0, 400)},
           cnae_secondaries = ${JSON.stringify(value.secondaries)}::jsonb,
           cnae_source = 'RECEITA',
           cnae_reference = ${value.reference},
-          cnae_synced_at = ${Date.now()},
-          updated_at = ${Date.now()}
+          cnae_synced_at = ${now},
+          updated_at = ${now}
       where owner_id = ${owner} and cnpj = ${value.cnpj}
         and (cnae_source is distinct from 'BRASILAPI')
       returning id`;

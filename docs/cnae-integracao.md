@@ -91,3 +91,9 @@ sintéticos sem conexão com o banco ou serviço externo. Antes do deploy execut
 também `pnpm lint` e `pnpm build` e validar a prévia de campanhas com CNAE
 principal/segundário em ambiente de homologação. Nenhuma migração foi executada
 automaticamente por esta mudança.
+
+O sincronizador valida **todo o JSONL antes de iniciar os UPDATEs**. Cada
+registro é gravado separadamente, portanto uma falha de banco após o início
+da aplicação pode deixar atualização parcial; nesse caso, revise as contagens
+e reexecute somente após investigar o problema. Nunca execute `--confirm`
+sem backup e simulação.

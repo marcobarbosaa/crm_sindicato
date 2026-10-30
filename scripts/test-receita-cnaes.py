@@ -15,7 +15,7 @@ class ReceitaCnaeTest(unittest.TestCase):
     def test_extracts_only_requested_company(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)
-            (folder / "targets.csv").write_text("cnpj\\n19131243000197\\n", encoding="utf-8")
+            (folder / "targets.csv").write_text("cnpj\n19131243000197\n", encoding="utf-8")
             with zipfile.ZipFile(folder / "Cnaes.zip", "w") as archive:
                 archive.writestr("K3241.CNAECSV", '"9430800";"Atividades de associações"\\n"9493600";"Cultura"\\n'.replace("\\n", "\n").encode("latin-1"))
             row = [""] * 13
