@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { observeScrollRegion } from "./scroll-region";
@@ -28,7 +28,7 @@ export function ProductStoryMotion({ children }: { children: ReactNode }) {
       delete element.dataset.activeChapter;
       active = -1;
     }
-    const stop = observeScrollRegion(element, "(min-width: 1200px) and (min-height: 800px) and (prefers-reduced-motion: no-preference)", ({ enabled, measure, initial }) => {
+    const stop = observeScrollRegion(element, "(min-width: 1200px) and (min-height: 900px) and (prefers-reduced-motion: no-preference)", ({ enabled, measure, initial }) => {
       // A read phase precedes every write. Copies keep identical row sizes with or
       // without enhancement, so making panels sticky never moves the anchors.
       if (measure || !starts.length) {
@@ -64,7 +64,7 @@ export function ProductStoryMotion({ children }: { children: ReactNode }) {
         panel.style.setProperty("--panel-scale", (0.96 + weight * 0.04).toFixed(4));
         panel.style.setProperty("--chapter-progress", local.toFixed(4));
         panel.dataset.visible = String(weight > 0.001);
-        // Visual crossfades can show two panels; assistive technology gets one.
+        // Visual transitions can show two panels; assistive technology gets one.
         if (next !== active || previousMode !== "sticky") {
           panel.inert = i !== next;
           panel.setAttribute("aria-hidden", String(i !== next));

@@ -2,6 +2,7 @@
 import { Check } from "lucide-react";
 import { DashboardPreview, CompaniesPreview, CampaignPreview, FollowUpsPreview } from "./platform-preview";
 import { ProductStoryMotion } from "./product-story-motion";
+import { MotionSurface } from "./motion-surface";
 import styles from "./landing.module.css";
 
 const chapters = [
@@ -38,18 +39,19 @@ const chapters = [
 export function ProductStory() {
   return <ProductStoryMotion>
     <nav className={styles.storyNav} aria-label="Capítulos da demonstração">
-      <span>EXPLORE A PLATAFORMA</span>
+      <span>03 — 04 / DA OPERAÇÃO À CONTINUIDADE</span>
       <ol>{chapters.map((chapter, i) => <li key={chapter.id}><a data-story-link="" href={"#" + chapter.id}><b>0{i + 1}</b><span>{chapter.short}</span></a></li>)}</ol>
     </nav>
+    <noscript><p className={styles.staticNotice}>Prévia estática. Ative o JavaScript para explorar as interações locais da demonstração.</p></noscript>
     <div className={styles.storyTrack}>
       {chapters.map(({ id, label, title, description, benefits, Preview }, i) => <section key={id} className={styles.storyChapter} aria-labelledby={id + "-title"} style={{ "--chapter-row": i + 1 } as CSSProperties}>
         <div id={id} data-story-copy="" className={styles.storyCopy} tabIndex={-1}>
-          <div className={styles.sectionHeading}>
-            <p className={styles.eyebrow}><span>0{i + 3}</span>{label}</p>
+          <MotionSurface kind="editorial"><div className={styles.sectionHeading}>
+            <p className={styles.eyebrow}>{label}</p>
             <p className={styles.chapterNumber}>0{i + 1} <span>/ 04</span></p>
             <h2 id={id + "-title"}>{title}</h2>
             <p className={styles.description}>{description}</p>
-          </div>
+          </div></MotionSurface>
           <ul className={styles.benefits}>{benefits.map(item => <li key={item}><Check aria-hidden="true" />{item}</li>)}</ul>
         </div>
         <div data-story-panel={id} className={styles.storyPanel}>

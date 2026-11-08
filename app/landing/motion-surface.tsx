@@ -3,7 +3,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import styles from "./landing.module.css";
 
-type MotionKind = "organization" | "dashboard" | "companies" | "campaigns" | "followups" | "resources";
+type MotionKind = "organization" | "dashboard" | "companies" | "campaigns" | "followups" | "resources" | "editorial";
 
 // Children remain server-rendered. This boundary observes visibility, not scroll progress.
 export function MotionSurface({ children, kind }: { children: ReactNode; kind: MotionKind }) {
@@ -30,12 +30,13 @@ export function MotionSurface({ children, kind }: { children: ReactNode; kind: M
           const transforms: Record<MotionKind, string> = {
             organization: "translateY(16px)", dashboard: "perspective(1400px) translateY(24px) rotateX(3deg)",
             companies: "translateY(12px) scale(.98)", campaigns: "translateX(-20px)",
-            followups: "translateY(20px)", resources: "translateY(14px)",
+            followups: "translateY(20px)", resources: "translateY(14px)", editorial: "translateY(14px)",
           };
           // Never hide content while waiting for JS or an observer callback.
           animations.push(element.animate([{ opacity: 0.7, transform: compact.matches ? "translateY(10px)" : transforms[kind] }, { opacity: 1, transform: "none" }], { duration: 850, easing: "cubic-bezier(.2,.7,.2,1)" }));
-          if (kind === "followups" || kind === "resources") {
-            const items = element.querySelectorAll(kind === "followups" ? "li" : "article");
+          if (kind === "followups" || kind === "resources" || kind === "dashboard" || kind === "editorial") {
+            const selector = kind === "dashboard" ? "[data-reveal]" : kind === "editorial" ? "h2, ." + styles.description : kind === "followups" ? "li" : "article, li";
+            const items = element.querySelectorAll(selector);
             items.forEach((item, i) => animations.push(item.animate([{ opacity: 0.65, translate: "0 8px" }, { opacity: 1, translate: "0 0" }], { duration: 600, delay: i * 75, easing: "ease-out" })));
           }
         }
