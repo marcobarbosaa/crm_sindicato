@@ -431,3 +431,116 @@
   .brandScene .sceneFallback { opacity: 1; }
   .primary:hover svg, .headerAccess:hover svg, .textLink:hover svg, .resourceGrid article:hover svg { transform: none; }
 }
+
+/* Stage 03. Scroll owns its wrappers; it never writes to the Three.js canvas. */
+.heroScroll { --scene-progress: 0; }
+.heroScroll .heroPreview {
+  transform: perspective(1400px) translateY(calc(var(--scene-progress) * -18px))
+    rotateY(calc(-5deg + var(--scene-progress) * 3deg))
+    rotateX(calc(2deg + var(--scene-progress) * 2deg))
+    scale(calc(1 - var(--scene-progress) * .025));
+}
+.heroScroll .brandScene { opacity: calc(1 - var(--scene-progress) * .18); }
+.heroScroll .visualTag { opacity: calc(1 - var(--scene-progress) * .5); }
+
+.organizationScroll { --scene-progress: 1; min-width: 0; perspective: 900px; }
+.organizationScroll .convergenceLines {
+  opacity: calc(.25 + var(--scene-progress) * .75);
+  border-color: #168b8355;
+}
+.organizationScroll .core {
+  background: linear-gradient(135deg, #fff, #e4f1ed);
+  box-shadow: 4px 5px 0 #c6ddd6, 0 20px 40px #153e4720;
+  transform: rotateX(calc((1 - var(--scene-progress)) * 6deg));
+}
+.organizationScroll .core::before {
+  content: ""; position: absolute; inset: -25px; border-radius: 50%;
+  background: radial-gradient(circle, #168b8330, transparent 68%);
+  opacity: var(--scene-progress); z-index: -1;
+}
+.organizationScroll .connectionNode {
+  --scatter-x: -25px; --scatter-y: -22px;
+  translate: calc(var(--scatter-x) * (1 - var(--scene-progress))) calc(var(--scatter-y) * (1 - var(--scene-progress)));
+  scale: calc(.96 + var(--scene-progress) * .04);
+  background: linear-gradient(135deg, #fff, #f2f8f6);
+  box-shadow: 0 2px 0 #d7e6e1, 0 12px 26px #153e4712;
+}
+.organizationScroll .connectionNode[data-position="1"] { --scatter-x: 25px; }
+.organizationScroll .connectionNode[data-position="2"] { --scatter-y: 22px; }
+.organizationScroll .connectionNode[data-position="3"] { --scatter-x: 25px; --scatter-y: 22px; }
+.organizationScroll .connectionNode[data-position="4"] { --scatter-x: 0px; --scatter-y: -28px; }
+
+.productStory { position: relative; background: #edf3f2; background: color-mix(in srgb, #edf3f2, #dbe9e5 calc(var(--campaign-atmosphere, 0) * 100%)); padding: 28px 0 64px; }
+.storyNav { width: min(1240px, calc(100% - 96px)); margin: 0 auto; padding: 20px 0; border-bottom: 1px solid #cbded9; }
+.storyNav > span { font-size: 9px; letter-spacing: .15em; color: #42665f; font-weight: 700; }
+.storyNav ol { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 12px 0 0; padding: 0; }
+.storyNav a { display: flex; align-items: center; gap: 9px; padding: 9px 13px; border-radius: 5px; border: 1px solid #c5dbd5; color: #345b55; font-size: 12px; background: #f7faf9; }
+.storyNav b { font-weight: 500; font-size: 10px; opacity: .75; }
+.storyNav a:hover, .storyNav a:focus-visible { border-color: #168b83; background: #e3f1ec; }
+.storyNav a[aria-current="step"] { color: white; background: #153e47; border-color: #153e47; }
+.storyTrack { width: min(1240px, calc(100% - 96px)); margin: 0 auto; }
+.storyChapter { padding: 64px 0; border-bottom: 1px solid #d5e4df; }
+.storyChapter:last-child { border-bottom: 0; }
+.storyCopy { scroll-margin-top: 110px; outline: none; }
+.storyCopy:focus-visible { outline: 2px solid #168b83; outline-offset: 10px; border-radius: 3px; }
+.storyCopy .sectionHeading h2 { font-size: clamp(30px, 3vw, 43px); }
+.chapterNumber { font-size: 42px; line-height: 1; letter-spacing: -.05em; color: #168b83; margin-bottom: 22px; }
+.chapterNumber span { font-size: 13px; letter-spacing: 0; color: #657e77; }
+.storyCopy .description { margin-top: 20px; }
+.storyPanel { min-width: 0; margin-top: 36px; padding: 15px; border: 1px solid #c9dcd6; border-radius: 14px; background: #e3eeea; box-shadow: 0 25px 55px -30px #08263255; }
+.storyPanelLabel { display: flex; justify-content: space-between; gap: 16px; color: #45655e; font-size: 9px; letter-spacing: .1em; padding: 2px 2px 13px; }
+.storyPanel .preview { box-shadow: 0 3px 6px #08263208, 0 15px 35px -20px #08263240; }
+.storyPanel[data-story-panel="campanhas"] { background: #082632; border-color: #315a61; }
+.storyPanel[data-story-panel="campanhas"] .storyPanelLabel { color: #b5d2d2; }
+.storyPanel[data-story-panel="visao-geral"] .metrics > div { border-color: #bbd9d1; }
+.storyPanel[data-story-panel="empresas"] .mockSearch { border-color: #7eb9aa; box-shadow: 0 0 0 3px #168b830d; }
+
+/* Stable rows exist before hydration too. Panels become sticky without changing
+   row heights or anchor positions. No duplicate previews or reparenting. */
+@media (min-width: 1200px) and (min-height: 800px) and (prefers-reduced-motion: no-preference) {
+  .productStory { padding-top: 0; }
+  .storyNav { position: sticky; top: 88px; z-index: 12; padding: 15px 0; background: #edf3f2f5; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+  .storyNav ol { margin: 0; gap: 6px; }
+  .storyTrack { display: grid; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); column-gap: 65px; }
+  .storyChapter { display: contents; }
+  .storyCopy { grid-column: 1; grid-row: var(--chapter-row); min-height: max(700px, 85svh); padding: 90px 0 100px; scroll-margin-top: 175px; }
+  .storyCopy .sectionHeading { max-width: 470px; }
+  .storyPanel { grid-column: 2; grid-row: var(--chapter-row); align-self: start; margin-top: 90px; }
+  .productStory[data-story-mode="sticky"] .storyPanel {
+    grid-row: 1 / 5; position: sticky; top: 190px;
+    clip-path: inset(-60px -60px -80px var(--panel-reveal, 0%));
+    transform: perspective(1400px) translate(var(--panel-x, 0px), var(--panel-y, 0px)) scale(var(--panel-scale, 1));
+    transform-origin: center top;
+  }
+  .productStory[data-story-mode="sticky"] .storyPanel[data-visible="false"] { visibility: hidden; pointer-events: none; }
+  .productStory[data-story-mode="sticky"] .storyPanel[aria-hidden="true"] { pointer-events: none; }
+  .productStory[data-story-mode="sticky"] .storyPanel[data-story-panel="visao-geral"] .metrics { transform: translateY(calc(var(--chapter-progress, 0) * -3px)); }
+  .productStory[data-story-mode="sticky"] .storyPanel[data-story-panel="campanhas"] .sendProgress { outline: 2px solid #168b8333; outline-offset: 8px; border-radius: 3px; }
+  .productStory[data-story-mode="sticky"] .storyPanel[data-story-panel="campanhas"] .sendProgress meter { filter: drop-shadow(0 0 calc(var(--chapter-progress, 0) * 4px) #168b8355); }
+  .productStory[data-story-mode="sticky"] .followList li { --item-step: 0; opacity: clamp(.65, calc(.65 + var(--chapter-progress, 0) * 1.1 - var(--item-step) * .18), 1); }
+  .productStory[data-story-mode="sticky"] .followList li:nth-child(2) { --item-step: 1; }
+  .productStory[data-story-mode="sticky"] .followList li:nth-child(3) { --item-step: 2; }
+}
+@media (max-width: 1199px), (max-height: 799px) {
+  .storyNav, .storyTrack { width: min(850px, calc(100% - 64px)); }
+  .storyCopy .sectionHeading { max-width: 650px; }
+}
+@media (max-width: 480px) {
+  .storyNav, .storyTrack { width: calc(100% - 40px); }
+  .storyNav ol { display: grid; grid-template-columns: 1fr 1fr; }
+  .storyNav a { padding: 10px; font-size: 11px; }
+  .storyPanel { padding: 7px; border-radius: 10px; }
+  .storyPanelLabel { font-size: 7px; padding: 5px 3px 10px; }
+  .storyChapter { padding-block: 50px; }
+  .storyCopy .sectionHeading h2 { font-size: 32px; }
+  .chapterNumber { font-size: 32px; }
+}
+@media (max-width: 1023px), (max-height: 699px), (prefers-reduced-motion: reduce) {
+  .heroScroll .heroPreview { transform: none; }
+  .organizationScroll .connectionNode { translate: none; scale: none; }
+  .organizationScroll .core { transform: none; }
+  .heroScroll .brandScene, .heroScroll .visualTag, .organizationScroll .convergenceLines { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .storyNav, .storyTrack { max-width: 850px; }
+}

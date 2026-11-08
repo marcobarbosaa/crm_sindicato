@@ -1,6 +1,7 @@
-﻿import { PublicHeader, PublicFooter } from "./landing/public-navigation";
-import { Hero, OrganizationSection, OverviewSection, FeatureSections, ResourcesSection, AccessSection } from "./landing/sections";
+import { PublicHeader, PublicFooter } from "./landing/public-navigation";
+import { Hero, OrganizationSection, ResourcesSection, AccessSection } from "./landing/sections";
 import styles from "./landing/landing.module.css";
+import { ProductStory } from "./landing/product-story";
 
 export function EntryExperience({ accessHref }: { accessHref: string }) {
   return (
@@ -10,8 +11,7 @@ export function EntryExperience({ accessHref }: { accessHref: string }) {
       <main>
         <Hero />
         <OrganizationSection />
-        <OverviewSection />
-        <FeatureSections />
+        <ProductStory />
         <ResourcesSection />
         <AccessSection accessHref={accessHref} />
       </main>
