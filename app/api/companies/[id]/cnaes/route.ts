@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { companies, activityLogs } from "@/db/schema";
-import { lookupBrasilApi, normalizeCnpjForLookup } from "@/lib/cnae";
+import { BrasilApiRateLimitError, lookupBrasilApi, normalizeCnpjForLookup } from "@/lib/cnae";
 
 // Matches the existing owner scoping in the companies API.
 const ownerId = () => "local-preview-user";
@@ -43,6 +43,19 @@ export async function POST(_request: NextRequest, context: { params: Promise<{ i
     });
     return NextResponse.json({ company: updated, cached: false });
   } catch (error) {
+    if (error instanceof BrasilApiRateLimitError) {
+      // Provider 429 is not a backend 502. Preserve Retry-After when available,
+      // but do not automatically retry or guess how long the provider will block.
+      return NextResponse.json(
+        { error: error.message, retryAfterSeconds: error.retryAfterSeconds },
+        {
+          status: 429,
+          headers: error.retryAfterSeconds
+            ? { "Retry-After": String(error.retryAfterSeconds) }
+            : undefined,
+        },
+      );
+    }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível consultar CNAEs." }, { status: 502 });
   }
 }

@@ -32,6 +32,7 @@ test("BrasilAPI busca só o CNPJ solicitado, retorna CNAEs sem dados pessoais", 
     globalThis.fetch=async (url,options)=>{
       assert.equal(url,"https://brasilapi.com.br/api/cnpj/v1/19131243000197");
       assert.equal(options.cache,"no-store");
+      assert.equal(options.headers["User-Agent"],"ProspectaCRM/1.0");
       return Response.json({cnpj:"19131243000197",cnae_fiscal:9430800,cnae_fiscal_descricao:"Associação",cnaes_secundarios:[{codigo:9493600,descricao:"Cultura"}],qsa:[{nome_socio:"NÃO DEVE SER RETIDO"}]});
     };
     const value=await lookupBrasilApi("19.131.243/0001-97");
@@ -40,6 +41,12 @@ test("BrasilAPI busca só o CNPJ solicitado, retorna CNAEs sem dados pessoais", 
     assert.equal(JSON.stringify(value).includes("nome_socio"),false);
     globalThis.fetch=async()=>Response.json({cnpj:"00000000000000",cnae_fiscal:9430800});
     await assert.rejects(lookupBrasilApi("19131243000197"),/diferente/);
+    globalThis.fetch=async()=>new Response("negado pelo provedor",{status:403});
+    await assert.rejects(lookupBrasilApi("19131243000197"),/403/);
+    globalThis.fetch=async()=>new Response("Too Many Requests",{status:429,headers:{"Retry-After":"120"}});
+    await assert.rejects(lookupBrasilApi("19131243000197"),err=>err.name==="BrasilApiRateLimitError" && err.retryAfterSeconds===120);
+    globalThis.fetch=async()=>new Response("Too Many Requests",{status:429});
+    await assert.rejects(lookupBrasilApi("19131243000197"),err=>err.name==="BrasilApiRateLimitError" && err.retryAfterSeconds===null);
     globalThis.fetch=async()=>new Response("indisponível",{status:503});
     await assert.rejects(lookupBrasilApi("19131243000197"),/indisponível/);
   } finally { globalThis.fetch=original; }
